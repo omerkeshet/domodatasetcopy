@@ -630,6 +630,36 @@ def main():
         # Check if exists in dev
         exists_in_dev = check_dataset_exists_in_dev(dataset_info.get('name', ''), dev_datasets)
         
+        # Dataset name configuration
+        st.markdown('<div class="section-title">Dataset Name</div>', unsafe_allow_html=True)
+        
+        default_name = dataset_info.get('name', '')
+        
+        use_custom_name = st.checkbox("Use different name in Dev", value=False, key="use_custom_name")
+        
+        if use_custom_name:
+            target_dataset_name = st.text_input(
+                "New Dataset Name",
+                value=default_name,
+                key="custom_name"
+            )
+            if not target_dataset_name.strip():
+                st.warning("Dataset name cannot be empty")
+                target_dataset_name = default_name
+        else:
+            target_dataset_name = default_name
+            st.markdown(f"""
+            <div class="alert alert-info">
+                <span class="alert-title">Dataset Name</span><br/>
+                <code>{default_name}</code>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        # Check if the target name exists in dev
+        target_exists_in_dev = check_dataset_exists_in_dev(target_dataset_name, dev_datasets)
+        
+        st.markdown('<div class="divider"></div>', unsafe_allow_html=True)
+        
         # Date filter configuration
         st.markdown('<div class="section-title">Date Filter</div>', unsafe_allow_html=True)
         
@@ -675,9 +705,18 @@ def main():
         render_dataset_info(
             dataset_info, 
             schema, 
-            exists_in_dev is not None,
-            exists_in_dev
+            target_exists_in_dev is not None,
+            target_exists_in_dev
         )
+        
+        # Show target name if different
+        if use_custom_name and target_dataset_name != dataset_info.get('name', ''):
+            st.markdown(f"""
+            <div class="alert alert-info">
+                <span class="alert-title">📝 New Name in Dev</span><br/>
+                <code>{target_dataset_name}</code>
+            </div>
+            """, unsafe_allow_html=True)
         
         st.markdown('<div class="divider"></div>', unsafe_allow_html=True)
         
@@ -689,11 +728,11 @@ def main():
         # Copy action
         st.markdown('<div class="section-title">Copy to Development</div>', unsafe_allow_html=True)
         
-        if exists_in_dev:
+        if target_exists_in_dev:
             st.markdown(f"""
             <div class="alert alert-warning">
                 <span class="alert-title">⚠️ Duplicate Warning</span><br/>
-                A dataset named "<strong>{dataset_info.get('name')}</strong>" already exists in dev.<br/>
+                A dataset named "<strong>{target_dataset_name}</strong>" already exists in dev.<br/>
                 Proceeding will create a new dataset with the same name.
             </div>
             """, unsafe_allow_html=True)
@@ -745,7 +784,7 @@ def main():
                 
                 new_dataset = create_dataset(
                     DEV_INSTANCE,
-                    dataset_info.get('name'),
+                    target_dataset_name,
                     schema
                 )
                 new_dataset_id = new_dataset.get('id')
@@ -765,7 +804,7 @@ def main():
                 st.markdown(f"""
                 <div class="alert alert-success">
                     <span class="alert-title">✅ Dataset Copied Successfully!</span><br/>
-                    <strong>Name:</strong> {dataset_info.get('name')}<br/>
+                    <strong>Name:</strong> {target_dataset_name}<br/>
                     <strong>New Dataset ID:</strong> {new_dataset_id}<br/>
                     <strong>Rows Copied:</strong> {len(df):,}<br/>
                     <strong>Target:</strong> <span class="instance-badge instance-dev">DEV</span> {DEV_INSTANCE}
