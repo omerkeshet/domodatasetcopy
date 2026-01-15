@@ -412,24 +412,46 @@ def get_domo_base_url(instance: str) -> str:
 
 @st.cache_data(ttl=300)
 def list_datasets(instance: str) -> List[Dict]:
-    """List all datasets from a DOMO instance."""
-    url = f"{get_domo_base_url(instance)}/api/data/v3/datasources"
+    """List all datasets from a DOMO instance using search endpoint."""
+    # Use the search endpoint which returns more complete data
+    url = f"{get_domo_base_url(instance)}/api/data/ui/v3/datasources/search"
     all_datasets = []
     offset = 0
-    limit = 50
+    limit = 100
     
     while True:
-        params = {'offset': offset, 'limit': limit}
-        response = requests.get(url, headers=get_domo_headers(instance), params=params, timeout=60)
+        payload = {
+            "filters": [],
+            "combineResults": True,
+            "count": limit,
+            "offset": offset,
+            "sort": {
+                "field": "name",
+                "order": "ASC"
+            }
+        }
+        
+        response = requests.post(url, headers=get_domo_headers(instance), json=payload, timeout=60)
         response.raise_for_status()
-        batch = response.json()
+        data = response.json()
+        
+        # The search endpoint returns {'datasources': [...], 'totalCount': N}
+        if isinstance(data, dict):
+            batch = data.get('datasources', [])
+            total_count = data.get('totalCount', 0)
+        elif isinstance(data, list):
+            batch = data
+            total_count = len(batch)
+        else:
+            break
         
         if not batch:
             break
-            
+        
         all_datasets.extend(batch)
         
-        if len(batch) < limit:
+        # Check if we've fetched all
+        if len(all_datasets) >= total_count or len(batch) < limit:
             break
             
         offset += limit
