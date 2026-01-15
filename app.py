@@ -1,13 +1,16 @@
 """
 DOMO Dataset Copy Tool
 Copies datasets from Production (keshet-tv) to Development (keshet-tv-dev)
+Uses OAuth authentication with the public DOMO API
 """
 
 import streamlit as st
 import requests
 import pandas as pd
+import base64
 from typing import Dict, List, Optional
 from datetime import datetime, timedelta
+from io import StringIO
 import time
 
 # =============================================================================
@@ -261,148 +264,135 @@ def apply_custom_css():
 
 
 # =============================================================================
-# DOMO API FUNCTIONS
+# OAUTH AUTHENTICATION
 # =============================================================================
 
-def get_domo_headers(instance: str) -> Dict[str, str]:
-    """Get headers for DOMO API requests based on instance."""
-    token_key = "prod_developer_token" if instance == PROD_INSTANCE else "dev_developer_token"
+def get_oauth_token(instance: str) -> Optional[str]:
+    """Get OAuth access token for an instance."""
+    if instance == PROD_INSTANCE:
+        client_id = st.secrets["domo"]["prod_client_id"]
+        client_secret = st.secrets["domo"]["prod_client_secret"]
+    else:
+        client_id = st.secrets["domo"]["dev_client_id"]
+        client_secret = st.secrets["domo"]["dev_client_secret"]
+    
+    auth_url = "https://api.domo.com/oauth/token"
+    
+    credentials = f"{client_id}:{client_secret}"
+    encoded_credentials = base64.b64encode(credentials.encode()).decode()
+    
+    headers = {
+        'Authorization': f'Basic {encoded_credentials}',
+        'Content-Type': 'application/x-www-form-urlencoded'
+    }
+    
+    data = {
+        'grant_type': 'client_credentials',
+        'scope': 'data'
+    }
+    
+    response = requests.post(auth_url, headers=headers, data=data, timeout=30)
+    
+    if response.status_code == 200:
+        return response.json().get('access_token')
+    else:
+        raise Exception(f"OAuth authentication failed: {response.text}")
+
+
+def get_oauth_headers(token: str) -> Dict[str, str]:
+    """Get headers with OAuth token."""
     return {
-        'Content-Type': 'application/json',
-        'X-DOMO-Developer-Token': st.secrets["domo"][token_key]
+        'Authorization': f'Bearer {token}',
+        'Content-Type': 'application/json'
     }
 
 
-def get_domo_base_url(instance: str) -> str:
-    """Get base URL for DOMO instance."""
-    return f"https://{instance}.domo.com"
-
+# =============================================================================
+# DOMO API FUNCTIONS
+# =============================================================================
 
 @st.cache_data(ttl=300)
 def list_datasets(instance: str) -> List[Dict]:
     """List all datasets from a DOMO instance."""
-    url = f"{get_domo_base_url(instance)}/api/data/v3/datasources"
+    token = get_oauth_token(instance)
+    
+    url = "https://api.domo.com/v1/datasets"
     all_datasets = []
+    offset = 0
+    limit = 50
     
-    # First request without parameters to get initial batch
-    headers = get_domo_headers(instance)
-    
-    try:
-        # Try without any query parameters first (works reliably)
-        response = requests.get(url, headers=headers, timeout=60)
+    while True:
+        params = {'offset': offset, 'limit': limit}
+        response = requests.get(url, headers=get_oauth_headers(token), params=params, timeout=60)
         response.raise_for_status()
-        data = response.json()
         
-        # API returns {'dataSources': [...], '_metaData': {...}}
-        batch = data.get('dataSources', [])
+        batch = response.json()
+        
+        if not batch:
+            break
+        
         all_datasets.extend(batch)
         
-        # Check metadata for total count
-        metadata = data.get('_metaData', {})
-        total_count = metadata.get('totalCount', len(batch))
-        
-        # If there are more datasets, paginate using limit only
-        offset = len(batch)
-        while offset < total_count:
-            try:
-                # Use limit parameter only for pagination
-                paginated_url = f"{url}?limit=50&offset={offset}"
-                response = requests.get(paginated_url, headers=headers, timeout=60)
-                response.raise_for_status()
-                data = response.json()
-                batch = data.get('dataSources', [])
-                
-                if not batch:
-                    break
-                    
-                all_datasets.extend(batch)
-                offset += len(batch)
-            except:
-                # If pagination fails, just return what we have
-                break
-        
-        return all_datasets
-        
-    except Exception as e:
-        # Fallback: try the UI search endpoint
-        try:
-            search_url = f"{get_domo_base_url(instance)}/api/data/ui/v3/datasources/search"
-            payload = {
-                "filters": [],
-                "combineResults": True,
-                "count": 500,
-                "offset": 0,
-                "sort": {"field": "name", "order": "ASC"}
-            }
-            response = requests.post(search_url, headers=headers, json=payload, timeout=60)
-            response.raise_for_status()
-            data = response.json()
-            return data.get('dataSources', [])
-        except:
-            raise e
+        if len(batch) < limit:
+            break
+            
+        offset += limit
+    
+    return all_datasets
 
 
 def get_dataset_info(instance: str, dataset_id: str) -> Dict:
     """Get detailed information about a specific dataset."""
-    url = f"{get_domo_base_url(instance)}/api/data/v3/datasources/{dataset_id}"
-    response = requests.get(url, headers=get_domo_headers(instance), timeout=60)
+    token = get_oauth_token(instance)
+    
+    url = f"https://api.domo.com/v1/datasets/{dataset_id}"
+    response = requests.get(url, headers=get_oauth_headers(token), timeout=60)
     response.raise_for_status()
     return response.json()
 
 
-def get_dataset_schema(instance: str, dataset_id: str) -> List[Dict]:
-    """Get schema (columns) for a dataset."""
-    dataset_info = get_dataset_info(instance, dataset_id)
-    return dataset_info.get('schemas', {}).get('columns', [])
+def export_dataset_data(instance: str, dataset_id: str) -> pd.DataFrame:
+    """Export dataset data as DataFrame."""
+    token = get_oauth_token(instance)
+    
+    url = f"https://api.domo.com/v1/datasets/{dataset_id}/data"
+    headers = get_oauth_headers(token)
+    headers['Accept'] = 'text/csv'
+    
+    response = requests.get(url, headers=headers, timeout=300)
+    response.raise_for_status()
+    
+    return pd.read_csv(StringIO(response.text))
 
 
 def create_dataset(instance: str, name: str, schema: List[Dict]) -> Dict:
     """Create a new dataset in the target instance."""
-    url = f"{get_domo_base_url(instance)}/api/data/v3/datasources"
+    token = get_oauth_token(instance)
+    
+    url = "https://api.domo.com/v1/datasets"
     
     payload = {
-        'name': name,
-        'schemas': {
-            'columns': schema
+        "name": name,
+        "description": f"Copied from {PROD_INSTANCE} on {datetime.now().strftime('%Y-%m-%d %H:%M')}",
+        "schema": {
+            "columns": schema
         }
     }
     
-    response = requests.post(url, headers=get_domo_headers(instance), json=payload, timeout=60)
+    response = requests.post(url, headers=get_oauth_headers(token), json=payload, timeout=60)
     response.raise_for_status()
     return response.json()
 
 
-def export_dataset_csv(instance: str, dataset_id: str) -> pd.DataFrame:
-    """Export dataset data using Domo Query API."""
-    url = f"{get_domo_base_url(instance)}/api/query/v1/execute/{dataset_id}"
-    headers = get_domo_headers(instance)
+def upload_data_to_dataset(instance: str, dataset_id: str, df: pd.DataFrame) -> bool:
+    """Upload data to a dataset."""
+    token = get_oauth_token(instance)
     
-    # Query all data from the dataset
-    payload = {
-        "sql": "SELECT * FROM table"
-    }
-    
-    response = requests.post(url, headers=headers, json=payload, timeout=300)
-    response.raise_for_status()
-    
-    data = response.json()
-    
-    # Parse the response - it contains columns and rows
-    columns = data.get('columns', [])
-    rows = data.get('rows', [])
-    
-    # Create DataFrame
-    df = pd.DataFrame(rows, columns=columns)
-    
-    return df
-
-
-def upload_data_to_dataset(instance: str, dataset_id: str, csv_data: str) -> bool:
-    """Upload CSV data to a dataset."""
-    url = f"{get_domo_base_url(instance)}/api/data/v3/datasources/{dataset_id}/data"
-    
-    headers = get_domo_headers(instance)
+    url = f"https://api.domo.com/v1/datasets/{dataset_id}/data"
+    headers = get_oauth_headers(token)
     headers['Content-Type'] = 'text/csv'
+    
+    csv_data = df.to_csv(index=False)
     
     response = requests.put(url, headers=headers, data=csv_data.encode('utf-8'), timeout=300)
     response.raise_for_status()
@@ -473,8 +463,8 @@ def render_instance_metrics(prod_count: int, dev_count: int):
 
 
 def render_dataset_info(dataset: Dict, schema: List[Dict], exists_in_dev: bool, dev_dataset: Optional[Dict] = None):
-    row_count = dataset.get('rowCount', 0) or 0
-    col_count = len(schema) if schema else dataset.get('columnCount', 0)
+    row_count = dataset.get('rows', 0) or 0
+    col_count = len(schema) if schema else dataset.get('columns', 0)
     
     status_class = "status-exists" if exists_in_dev else "status-new"
     status_text = "EXISTS IN DEV" if exists_in_dev else "NEW TO DEV"
@@ -606,7 +596,7 @@ def main():
         # Get dataset details
         try:
             dataset_info = get_dataset_info(PROD_INSTANCE, selected_ds_id)
-            schema = dataset_info.get('schemas', {}).get('columns', [])
+            schema = dataset_info.get('schema', {}).get('columns', [])
             date_columns = get_date_columns(schema)
         except Exception as e:
             st.error(f"Failed to load dataset details: {e}")
@@ -694,7 +684,7 @@ def main():
                 progress_placeholder.progress(0.2, "Exporting data from Production...")
                 status_placeholder.info("📥 Downloading data from production instance...")
                 
-                df = export_dataset_csv(PROD_INSTANCE, selected_ds_id)
+                df = export_dataset_data(PROD_INSTANCE, selected_ds_id)
                 original_count = len(df)
                 
                 # Apply date filter if specified
@@ -728,9 +718,7 @@ def main():
                 progress_placeholder.progress(0.8, "Uploading data to Development...")
                 status_placeholder.info(f"📤 Uploading {len(df):,} rows to dev instance...")
                 
-                # Convert back to CSV for upload
-                csv_to_upload = df.to_csv(index=False)
-                upload_data_to_dataset(DEV_INSTANCE, new_dataset_id, csv_to_upload)
+                upload_data_to_dataset(DEV_INSTANCE, new_dataset_id, df)
                 
                 # Done!
                 progress_placeholder.progress(1.0, "Complete!")
