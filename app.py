@@ -8,7 +8,6 @@ import requests
 import pandas as pd
 from typing import Dict, List, Optional
 from datetime import datetime, timedelta
-from io import StringIO
 import time
 
 # =============================================================================
@@ -373,16 +372,29 @@ def create_dataset(instance: str, name: str, schema: List[Dict]) -> Dict:
     return response.json()
 
 
-def export_dataset_csv(instance: str, dataset_id: str) -> str:
-    """Export dataset data as CSV string."""
-    url = f"{get_domo_base_url(instance)}/api/data/v3/datasources/{dataset_id}/export"
-    
+def export_dataset_csv(instance: str, dataset_id: str) -> pd.DataFrame:
+    """Export dataset data using Domo Query API."""
+    url = f"{get_domo_base_url(instance)}/api/query/v1/execute/{dataset_id}"
     headers = get_domo_headers(instance)
-    headers['Accept'] = 'text/csv'
     
-    response = requests.get(url, headers=headers, timeout=300)
+    # Query all data from the dataset
+    payload = {
+        "sql": "SELECT * FROM table"
+    }
+    
+    response = requests.post(url, headers=headers, json=payload, timeout=300)
     response.raise_for_status()
-    return response.text
+    
+    data = response.json()
+    
+    # Parse the response - it contains columns and rows
+    columns = data.get('columns', [])
+    rows = data.get('rows', [])
+    
+    # Create DataFrame
+    df = pd.DataFrame(rows, columns=columns)
+    
+    return df
 
 
 def upload_data_to_dataset(instance: str, dataset_id: str, csv_data: str) -> bool:
@@ -682,8 +694,7 @@ def main():
                 progress_placeholder.progress(0.2, "Exporting data from Production...")
                 status_placeholder.info("📥 Downloading data from production instance...")
                 
-                csv_data = export_dataset_csv(PROD_INSTANCE, selected_ds_id)
-                df = pd.read_csv(StringIO(csv_data))
+                df = export_dataset_csv(PROD_INSTANCE, selected_ds_id)
                 original_count = len(df)
                 
                 # Apply date filter if specified
