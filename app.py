@@ -1,7 +1,12 @@
+"""
+DOMO Dataset Copy Tool
+Copies datasets from Production (keshet-tv) to Development (keshet-tv-dev)
+"""
+
 import streamlit as st
 import requests
 import pandas as pd
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Optional
 from datetime import datetime, timedelta
 from io import StringIO
 import time
@@ -27,7 +32,6 @@ def apply_custom_css():
         --primary: #4a5568;
         --primary-dark: #2d3748;
         --accent: #5a67d8;
-        --accent-light: #7f9cf5;
         --success: #48bb78;
         --success-bg: #f0fff4;
         --success-border: #9ae6b4;
@@ -47,7 +51,6 @@ def apply_custom_css():
         --text-secondary: #718096;
         --text-muted: #a0aec0;
         --border-color: #e2e8f0;
-        --border-dark: #cbd5e0;
     }
     
     .stApp {
@@ -55,13 +58,12 @@ def apply_custom_css():
         font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
     }
     
-    /* Header */
     .app-header {
         background: linear-gradient(135deg, var(--primary-dark) 0%, var(--primary) 100%);
         padding: 2rem 2.5rem;
         border-radius: 8px;
         margin-bottom: 2rem;
-        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
     }
     
     .app-title {
@@ -69,17 +71,14 @@ def apply_custom_css():
         font-size: 1.5rem;
         font-weight: 600;
         margin: 0;
-        letter-spacing: -0.025em;
     }
     
     .app-subtitle {
         color: rgba(255,255,255,0.85) !important;
         font-size: 0.875rem;
-        font-weight: 400;
         margin-top: 0.5rem;
     }
     
-    /* Metric boxes */
     .metric-box {
         background: var(--bg-secondary);
         border-radius: 6px;
@@ -102,7 +101,6 @@ def apply_custom_css():
         letter-spacing: 0.05em;
     }
     
-    /* Status indicators */
     .status-indicator {
         display: inline-flex;
         align-items: center;
@@ -111,37 +109,6 @@ def apply_custom_css():
         font-size: 0.75rem;
         font-weight: 500;
         text-transform: uppercase;
-        letter-spacing: 0.025em;
-    }
-    
-    .status-ready {
-        background: var(--success-bg);
-        color: #276749;
-        border: 1px solid var(--success-border);
-    }
-    
-    .status-warning {
-        background: var(--warning-bg);
-        color: #c05621;
-        border: 1px solid var(--warning-border);
-    }
-    
-    .status-error {
-        background: var(--error-bg);
-        color: #c53030;
-        border: 1px solid var(--error-border);
-    }
-    
-    .status-info {
-        background: var(--info-bg);
-        color: #2b6cb0;
-        border: 1px solid var(--info-border);
-    }
-    
-    .status-neutral {
-        background: var(--bg-tertiary);
-        color: var(--text-secondary);
-        border: 1px solid var(--border-color);
     }
     
     .status-exists {
@@ -156,7 +123,6 @@ def apply_custom_css():
         border: 1px solid var(--success-border);
     }
     
-    /* Alert boxes */
     .alert {
         border-radius: 6px;
         padding: 1rem;
@@ -193,7 +159,6 @@ def apply_custom_css():
         margin-bottom: 0.25rem;
     }
     
-    /* Dataset card */
     .dataset-card {
         background: var(--bg-secondary);
         border: 1px solid var(--border-color);
@@ -226,7 +191,6 @@ def apply_custom_css():
         display: grid;
         grid-template-columns: repeat(3, 1fr);
         gap: 1rem;
-        margin-bottom: 1rem;
     }
     
     .dataset-card-detail {
@@ -246,7 +210,6 @@ def apply_custom_css():
         letter-spacing: 0.05em;
     }
     
-    /* Section titles */
     .section-title {
         font-size: 0.875rem;
         font-weight: 600;
@@ -258,88 +221,6 @@ def apply_custom_css():
         border-bottom: 2px solid var(--border-color);
     }
     
-    /* Buttons */
-    .stButton > button {
-        font-family: 'Inter', sans-serif;
-        font-weight: 500;
-        border-radius: 6px;
-        padding: 0.5rem 1.5rem;
-        transition: all 0.15s ease;
-        text-transform: none;
-        letter-spacing: 0;
-    }
-    
-    .stButton > button[kind="primary"] {
-        background: var(--accent);
-        border: none;
-        color: white;
-    }
-    
-    .stButton > button[kind="primary"]:hover {
-        background: var(--primary-dark);
-    }
-    
-    /* Input styling */
-    .stTextInput > div > div > input {
-        font-family: 'Inter', sans-serif;
-        border-radius: 6px;
-        border: 1px solid #cbd5e0 !important;
-        background-color: #ffffff !important;
-    }
-    
-    .stTextInput > div > div > input:focus {
-        border-color: #5a67d8 !important;
-        box-shadow: 0 0 0 2px rgba(90, 103, 216, 0.2) !important;
-    }
-    
-    .stSelectbox > div > div {
-        border-radius: 6px;
-        border: 1px solid #cbd5e0 !important;
-        background-color: #ffffff !important;
-    }
-    
-    .stDateInput > div > div > input {
-        font-family: 'Inter', sans-serif;
-        border-radius: 6px;
-        border: 1px solid #cbd5e0 !important;
-        background-color: #ffffff !important;
-    }
-    
-    /* Hide Streamlit elements */
-    #MainMenu {visibility: hidden;}
-    footer {visibility: hidden;}
-    .stDeployButton {display: none;}
-    
-    /* Divider */
-    .divider {
-        height: 1px;
-        background: var(--border-color);
-        margin: 1.5rem 0;
-    }
-    
-    /* Instance badge */
-    .instance-badge {
-        display: inline-flex;
-        align-items: center;
-        padding: 0.25rem 0.5rem;
-        border-radius: 4px;
-        font-size: 0.7rem;
-        font-weight: 600;
-        text-transform: uppercase;
-        letter-spacing: 0.05em;
-    }
-    
-    .instance-prod {
-        background: #fed7d7;
-        color: #c53030;
-    }
-    
-    .instance-dev {
-        background: #c6f6d5;
-        color: #276749;
-    }
-    
-    /* Column info */
     .column-item {
         background: var(--bg-tertiary);
         border-radius: 4px;
@@ -352,43 +233,30 @@ def apply_custom_css():
         align-items: center;
     }
     
-    .column-name {
-        color: var(--text-primary);
-    }
+    .column-name { color: var(--text-primary); }
+    .column-type { color: var(--text-muted); font-size: 0.7rem; }
     
-    .column-type {
-        color: var(--text-muted);
+    .instance-badge {
+        display: inline-flex;
+        padding: 0.25rem 0.5rem;
+        border-radius: 4px;
         font-size: 0.7rem;
+        font-weight: 600;
+        text-transform: uppercase;
     }
     
-    /* Progress container */
-    .progress-container {
-        background: var(--bg-tertiary);
-        border-radius: 6px;
-        padding: 1.5rem;
-        margin: 1rem 0;
+    .instance-prod { background: #fed7d7; color: #c53030; }
+    .instance-dev { background: #c6f6d5; color: #276749; }
+    
+    .divider {
+        height: 1px;
+        background: var(--border-color);
+        margin: 1.5rem 0;
     }
     
-    .progress-step {
-        display: flex;
-        align-items: center;
-        padding: 0.5rem 0;
-        color: var(--text-secondary);
-    }
-    
-    .progress-step.active {
-        color: var(--accent);
-        font-weight: 500;
-    }
-    
-    .progress-step.completed {
-        color: var(--success);
-    }
-    
-    .progress-step-icon {
-        margin-right: 0.75rem;
-        font-size: 1rem;
-    }
+    #MainMenu {visibility: hidden;}
+    footer {visibility: hidden;}
+    .stDeployButton {display: none;}
     </style>
     """, unsafe_allow_html=True)
 
@@ -405,6 +273,7 @@ def get_domo_headers(instance: str) -> Dict[str, str]:
         'X-DOMO-Developer-Token': st.secrets["domo"][token_key]
     }
 
+
 def get_domo_base_url(instance: str) -> str:
     """Get base URL for DOMO instance."""
     return f"https://{instance}.domo.com"
@@ -412,46 +281,28 @@ def get_domo_base_url(instance: str) -> str:
 
 @st.cache_data(ttl=300)
 def list_datasets(instance: str) -> List[Dict]:
-    """List all datasets from a DOMO instance using search endpoint."""
-    # Use the search endpoint which returns more complete data
-    url = f"{get_domo_base_url(instance)}/api/data/ui/v3/datasources/search"
+    """List all datasets from a DOMO instance."""
+    url = f"{get_domo_base_url(instance)}/api/data/v3/datasources"
     all_datasets = []
     offset = 0
     limit = 100
     
     while True:
-        payload = {
-            "filters": [],
-            "combineResults": True,
-            "count": limit,
-            "offset": offset,
-            "sort": {
-                "field": "name",
-                "order": "ASC"
-            }
-        }
-        
-        response = requests.post(url, headers=get_domo_headers(instance), json=payload, timeout=60)
+        params = {'offset': offset, 'limit': limit}
+        response = requests.get(url, headers=get_domo_headers(instance), params=params, timeout=60)
         response.raise_for_status()
         data = response.json()
         
-        # The search endpoint returns {'datasources': [...], 'totalCount': N}
-        if isinstance(data, dict):
-            batch = data.get('datasources', [])
-            total_count = data.get('totalCount', 0)
-        elif isinstance(data, list):
-            batch = data
-            total_count = len(batch)
-        else:
-            break
+        # API returns {'dataSources': [...], '_metaData': {...}}
+        batch = data.get('dataSources', [])
         
         if not batch:
             break
         
         all_datasets.extend(batch)
         
-        # Check if we've fetched all
-        if len(all_datasets) >= total_count or len(batch) < limit:
+        # Check if we got fewer than requested (meaning we're at the end)
+        if len(batch) < limit:
             break
             
         offset += limit
@@ -473,31 +324,6 @@ def get_dataset_schema(instance: str, dataset_id: str) -> List[Dict]:
     return dataset_info.get('schemas', {}).get('columns', [])
 
 
-def export_dataset_data(instance: str, dataset_id: str, date_column: Optional[str] = None, 
-                        start_date: Optional[datetime] = None, end_date: Optional[datetime] = None) -> pd.DataFrame:
-    """Export data from a dataset with optional date filtering."""
-    url = f"{get_domo_base_url(instance)}/api/data/v3/datasources/{dataset_id}/export"
-    
-    headers = get_domo_headers(instance)
-    headers['Accept'] = 'text/csv'
-    
-    response = requests.get(url, headers=headers, timeout=300)
-    response.raise_for_status()
-    
-    df = pd.read_csv(StringIO(response.text))
-    
-    # Apply date filter if specified
-    if date_column and start_date and end_column in df.columns:
-        df[date_column] = pd.to_datetime(df[date_column], errors='coerce')
-        
-        if start_date:
-            df = df[df[date_column] >= pd.Timestamp(start_date)]
-        if end_date:
-            df = df[df[date_column] <= pd.Timestamp(end_date)]
-    
-    return df
-
-
 def create_dataset(instance: str, name: str, schema: List[Dict]) -> Dict:
     """Create a new dataset in the target instance."""
     url = f"{get_domo_base_url(instance)}/api/data/v3/datasources"
@@ -514,16 +340,26 @@ def create_dataset(instance: str, name: str, schema: List[Dict]) -> Dict:
     return response.json()
 
 
-def upload_data_to_dataset(instance: str, dataset_id: str, df: pd.DataFrame) -> bool:
-    """Upload data to a dataset."""
+def export_dataset_csv(instance: str, dataset_id: str) -> str:
+    """Export dataset data as CSV string."""
+    url = f"{get_domo_base_url(instance)}/api/data/v3/datasources/{dataset_id}/export"
+    
+    headers = get_domo_headers(instance)
+    headers['Accept'] = 'text/csv'
+    
+    response = requests.get(url, headers=headers, timeout=300)
+    response.raise_for_status()
+    return response.text
+
+
+def upload_data_to_dataset(instance: str, dataset_id: str, csv_data: str) -> bool:
+    """Upload CSV data to a dataset."""
     url = f"{get_domo_base_url(instance)}/api/data/v3/datasources/{dataset_id}/data"
     
     headers = get_domo_headers(instance)
     headers['Content-Type'] = 'text/csv'
     
-    csv_data = df.to_csv(index=False)
-    
-    response = requests.put(url, headers=headers, data=csv_data, timeout=300)
+    response = requests.put(url, headers=headers, data=csv_data.encode('utf-8'), timeout=300)
     response.raise_for_status()
     return True
 
@@ -542,7 +378,7 @@ def get_date_columns(schema: List[Dict]) -> List[str]:
     return [col['name'] for col in schema if col.get('type', '').upper() in date_types]
 
 
-def format_row_count(count: int) -> str:
+def format_row_count(count) -> str:
     """Format row count with commas."""
     if count is None:
         return "N/A"
@@ -554,7 +390,6 @@ def format_row_count(count: int) -> str:
 # =============================================================================
 
 def render_header():
-    """Render the app header."""
     st.markdown(f"""
     <div class="app-header">
         <h1 class="app-title">📦 {APP_NAME}</h1>
@@ -564,7 +399,6 @@ def render_header():
 
 
 def render_instance_metrics(prod_count: int, dev_count: int):
-    """Render instance dataset counts."""
     col1, col2, col3 = st.columns(3)
     
     with col1:
@@ -584,18 +418,18 @@ def render_instance_metrics(prod_count: int, dev_count: int):
         """, unsafe_allow_html=True)
     
     with col3:
+        diff = prod_count - dev_count if prod_count > dev_count else 0
         st.markdown(f"""
         <div class="metric-box">
-            <div class="metric-value">{prod_count - dev_count if prod_count > dev_count else 0}</div>
+            <div class="metric-value">{diff}</div>
             <div class="metric-label">Missing in Dev</div>
         </div>
         """, unsafe_allow_html=True)
 
 
 def render_dataset_info(dataset: Dict, schema: List[Dict], exists_in_dev: bool, dev_dataset: Optional[Dict] = None):
-    """Render dataset information card."""
-    row_count = dataset.get('rows', 0) or 0
-    col_count = len(schema)
+    row_count = dataset.get('rowCount', 0) or 0
+    col_count = len(schema) if schema else dataset.get('columnCount', 0)
     
     status_class = "status-exists" if exists_in_dev else "status-new"
     status_text = "EXISTS IN DEV" if exists_in_dev else "NEW TO DEV"
@@ -631,16 +465,19 @@ def render_dataset_info(dataset: Dict, schema: List[Dict], exists_in_dev: bool, 
         <div class="alert alert-warning">
             <span class="alert-title">⚠️ Dataset Already Exists in Dev</span><br/>
             A dataset with this name already exists in the dev instance (ID: {dev_dataset.get('id', 'N/A')}).<br/>
-            Copying will create a <strong>new dataset</strong> - consider renaming if needed.
+            Copying will create a <strong>new dataset</strong> with the same name.
         </div>
         """, unsafe_allow_html=True)
 
 
 def render_schema_preview(schema: List[Dict], date_columns: List[str]):
-    """Render schema preview with date columns highlighted."""
     st.markdown('<div class="section-title">Schema Preview</div>', unsafe_allow_html=True)
     
-    for col in schema[:10]:  # Show first 10 columns
+    if not schema:
+        st.warning("No schema information available")
+        return
+    
+    for col in schema[:10]:
         is_date = col['name'] in date_columns
         date_indicator = " 📅" if is_date else ""
         st.markdown(f"""
@@ -681,15 +518,18 @@ def main():
             dev_datasets = list_datasets(DEV_INSTANCE)
     except Exception as e:
         st.error(f"Failed to load datasets: {e}")
+        st.exception(e)
         return
-    
-    # Create lookup for dev datasets by name
-    dev_dataset_names = {ds.get('name', '').lower(): ds for ds in dev_datasets}
     
     # Render metrics
     render_instance_metrics(len(prod_datasets), len(dev_datasets))
     
     st.markdown('<div class="divider"></div>', unsafe_allow_html=True)
+    
+    # Check if we have datasets
+    if not prod_datasets:
+        st.warning("No datasets found in Production instance")
+        return
     
     # Main layout
     col_select, col_preview = st.columns([1, 2])
@@ -698,13 +538,16 @@ def main():
         st.markdown('<div class="section-title">Select Dataset</div>', unsafe_allow_html=True)
         
         # Create options for selectbox
-        dataset_options = {f"{ds['id']} | {ds['name']}": ds['id'] for ds in prod_datasets}
+        dataset_options = {f"{ds['name']} ({ds['id'][:8]}...)": ds['id'] for ds in prod_datasets}
         
         # Search filter
         st.markdown("**Search Production Datasets**")
         search_term = st.text_input("Search", "", placeholder="Filter by name or ID", key="ds_search", label_visibility="collapsed")
         
-        filtered_options = [opt for opt in dataset_options.keys() if search_term.lower() in opt.lower()]
+        if search_term:
+            filtered_options = [opt for opt in dataset_options.keys() if search_term.lower() in opt.lower()]
+        else:
+            filtered_options = list(dataset_options.keys())
         
         if not filtered_options:
             st.warning("No matching datasets found")
@@ -718,7 +561,7 @@ def main():
         # Get dataset details
         try:
             dataset_info = get_dataset_info(PROD_INSTANCE, selected_ds_id)
-            schema = get_dataset_schema(PROD_INSTANCE, selected_ds_id)
+            schema = dataset_info.get('schemas', {}).get('columns', [])
             date_columns = get_date_columns(schema)
         except Exception as e:
             st.error(f"Failed to load dataset details: {e}")
@@ -806,38 +649,21 @@ def main():
                 progress_placeholder.progress(0.2, "Exporting data from Production...")
                 status_placeholder.info("📥 Downloading data from production instance...")
                 
+                csv_data = export_dataset_csv(PROD_INSTANCE, selected_ds_id)
+                df = pd.read_csv(StringIO(csv_data))
+                original_count = len(df)
+                
+                # Apply date filter if specified
                 if selected_date_column and start_date and end_date:
-                    # Export with date filter
-                    url = f"{get_domo_base_url(PROD_INSTANCE)}/api/data/v3/datasources/{selected_ds_id}/export"
-                    headers = get_domo_headers(PROD_INSTANCE)
-                    headers['Accept'] = 'text/csv'
-                    
-                    response = requests.get(url, headers=headers, timeout=300)
-                    response.raise_for_status()
-                    
-                    df = pd.read_csv(StringIO(response.text))
-                    
-                    # Apply date filter
-                    original_count = len(df)
                     df[selected_date_column] = pd.to_datetime(df[selected_date_column], errors='coerce')
                     df = df[
                         (df[selected_date_column] >= pd.Timestamp(start_date)) & 
                         (df[selected_date_column] <= pd.Timestamp(end_date))
                     ]
                     filtered_count = len(df)
-                    
-                    status_placeholder.info(f"📊 Filtered {original_count:,} rows → {filtered_count:,} rows (date range: {start_date} to {end_date})")
+                    status_placeholder.info(f"📊 Filtered {original_count:,} rows → {filtered_count:,} rows")
                 else:
-                    # Export all data
-                    url = f"{get_domo_base_url(PROD_INSTANCE)}/api/data/v3/datasources/{selected_ds_id}/export"
-                    headers = get_domo_headers(PROD_INSTANCE)
-                    headers['Accept'] = 'text/csv'
-                    
-                    response = requests.get(url, headers=headers, timeout=300)
-                    response.raise_for_status()
-                    
-                    df = pd.read_csv(StringIO(response.text))
-                    status_placeholder.info(f"📊 Exported {len(df):,} rows")
+                    status_placeholder.info(f"📊 Exported {original_count:,} rows")
                 
                 time.sleep(0.5)
                 
@@ -858,10 +684,13 @@ def main():
                 progress_placeholder.progress(0.8, "Uploading data to Development...")
                 status_placeholder.info(f"📤 Uploading {len(df):,} rows to dev instance...")
                 
-                upload_data_to_dataset(DEV_INSTANCE, new_dataset_id, df)
+                # Convert back to CSV for upload
+                csv_to_upload = df.to_csv(index=False)
+                upload_data_to_dataset(DEV_INSTANCE, new_dataset_id, csv_to_upload)
                 
                 # Done!
                 progress_placeholder.progress(1.0, "Complete!")
+                status_placeholder.empty()
                 
                 st.markdown(f"""
                 <div class="alert alert-success">
@@ -878,12 +707,14 @@ def main():
                 
             except Exception as e:
                 progress_placeholder.empty()
+                status_placeholder.empty()
                 st.markdown(f"""
                 <div class="alert alert-error">
                     <span class="alert-title">❌ Copy Failed</span><br/>
                     Error: {str(e)}
                 </div>
                 """, unsafe_allow_html=True)
+                st.exception(e)
 
 
 if __name__ == "__main__":
