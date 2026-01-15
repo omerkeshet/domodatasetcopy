@@ -284,30 +284,63 @@ def list_datasets(instance: str) -> List[Dict]:
     """List all datasets from a DOMO instance."""
     url = f"{get_domo_base_url(instance)}/api/data/v3/datasources"
     all_datasets = []
-    offset = 0
-    limit = 100
     
-    while True:
-        params = {'offset': offset, 'limit': limit}
-        response = requests.get(url, headers=get_domo_headers(instance), params=params, timeout=60)
+    # First request without parameters to get initial batch
+    headers = get_domo_headers(instance)
+    
+    try:
+        # Try without any query parameters first (works reliably)
+        response = requests.get(url, headers=headers, timeout=60)
         response.raise_for_status()
         data = response.json()
         
         # API returns {'dataSources': [...], '_metaData': {...}}
         batch = data.get('dataSources', [])
-        
-        if not batch:
-            break
-        
         all_datasets.extend(batch)
         
-        # Check if we got fewer than requested (meaning we're at the end)
-        if len(batch) < limit:
-            break
-            
-        offset += limit
-    
-    return all_datasets
+        # Check metadata for total count
+        metadata = data.get('_metaData', {})
+        total_count = metadata.get('totalCount', len(batch))
+        
+        # If there are more datasets, paginate using limit only
+        offset = len(batch)
+        while offset < total_count:
+            try:
+                # Use limit parameter only for pagination
+                paginated_url = f"{url}?limit=50&offset={offset}"
+                response = requests.get(paginated_url, headers=headers, timeout=60)
+                response.raise_for_status()
+                data = response.json()
+                batch = data.get('dataSources', [])
+                
+                if not batch:
+                    break
+                    
+                all_datasets.extend(batch)
+                offset += len(batch)
+            except:
+                # If pagination fails, just return what we have
+                break
+        
+        return all_datasets
+        
+    except Exception as e:
+        # Fallback: try the UI search endpoint
+        try:
+            search_url = f"{get_domo_base_url(instance)}/api/data/ui/v3/datasources/search"
+            payload = {
+                "filters": [],
+                "combineResults": True,
+                "count": 500,
+                "offset": 0,
+                "sort": {"field": "name", "order": "ASC"}
+            }
+            response = requests.post(search_url, headers=headers, json=payload, timeout=60)
+            response.raise_for_status()
+            data = response.json()
+            return data.get('dataSources', [])
+        except:
+            raise e
 
 
 def get_dataset_info(instance: str, dataset_id: str) -> Dict:
