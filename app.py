@@ -362,7 +362,32 @@ def export_dataset_data(instance: str, dataset_id: str) -> pd.DataFrame:
     response = requests.get(url, headers=headers, timeout=300)
     response.raise_for_status()
     
-    return pd.read_csv(StringIO(response.text))
+    # The DOMO API returns CSV without headers - just data
+    # We need to get the schema first to know column names
+    dataset_info = get_dataset_info(instance, dataset_id)
+    schema = dataset_info.get('schema', {}).get('columns', [])
+    column_names = [col['name'] for col in schema]
+    
+    # Read CSV - check if it has headers or not
+    csv_text = response.text
+    
+    # Try to detect if first row is header by checking if it matches schema
+    first_line = csv_text.split('\n')[0] if csv_text else ""
+    first_line_values = first_line.split(',') if first_line else []
+    
+    # Check if first line looks like column names (matches schema)
+    has_header = len(first_line_values) == len(column_names) and any(
+        val.strip().strip('"') in column_names for val in first_line_values[:3]
+    )
+    
+    if has_header:
+        # CSV has headers
+        df = pd.read_csv(StringIO(csv_text))
+    else:
+        # CSV has no headers - use schema column names
+        df = pd.read_csv(StringIO(csv_text), header=None, names=column_names)
+    
+    return df
 
 
 def create_dataset(instance: str, name: str, schema: List[Dict]) -> Dict:
@@ -689,13 +714,26 @@ def main():
                 
                 # Apply date filter if specified
                 if selected_date_column and start_date and end_date:
-                    df[selected_date_column] = pd.to_datetime(df[selected_date_column], errors='coerce')
-                    df = df[
-                        (df[selected_date_column] >= pd.Timestamp(start_date)) & 
-                        (df[selected_date_column] <= pd.Timestamp(end_date))
-                    ]
-                    filtered_count = len(df)
-                    status_placeholder.info(f"📊 Filtered {original_count:,} rows → {filtered_count:,} rows")
+                    # Check if column exists in dataframe
+                    if selected_date_column not in df.columns:
+                        # Try case-insensitive match
+                        matching_cols = [c for c in df.columns if c.lower() == selected_date_column.lower()]
+                        if matching_cols:
+                            selected_date_column = matching_cols[0]
+                        else:
+                            status_placeholder.warning(f"⚠️ Column '{selected_date_column}' not found. Copying all data.")
+                            selected_date_column = None
+                    
+                    if selected_date_column:
+                        df[selected_date_column] = pd.to_datetime(df[selected_date_column], errors='coerce')
+                        df = df[
+                            (df[selected_date_column] >= pd.Timestamp(start_date)) & 
+                            (df[selected_date_column] <= pd.Timestamp(end_date))
+                        ]
+                        filtered_count = len(df)
+                        status_placeholder.info(f"📊 Filtered {original_count:,} rows → {filtered_count:,} rows")
+                    else:
+                        status_placeholder.info(f"📊 Exported {original_count:,} rows")
                 else:
                     status_placeholder.info(f"📊 Exported {original_count:,} rows")
                 
