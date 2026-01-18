@@ -731,9 +731,9 @@ def main():
         if target_exists_in_dev:
             st.markdown(f"""
             <div class="alert alert-warning">
-                <span class="alert-title">⚠️ Duplicate Warning</span><br/>
-                A dataset named "<strong>{target_dataset_name}</strong>" already exists in dev.<br/>
-                Proceeding will create a new dataset with the same name.
+                <span class="alert-title">⚠️ Dataset Already Exists</span><br/>
+                A dataset named "<strong>{target_dataset_name}</strong>" already exists in dev (ID: {target_exists_in_dev.get('id', 'N/A')}).<br/>
+                Proceeding will <strong>replace the data</strong> in the existing dataset.
             </div>
             """, unsafe_allow_html=True)
         
@@ -778,16 +778,23 @@ def main():
                 
                 time.sleep(0.5)
                 
-                # Step 2: Create dataset in dev
-                progress_placeholder.progress(0.5, "Creating dataset in Development...")
-                status_placeholder.info("🏗️ Creating new dataset in development instance...")
-                
-                new_dataset = create_dataset(
-                    DEV_INSTANCE,
-                    target_dataset_name,
-                    schema
-                )
-                new_dataset_id = new_dataset.get('id')
+                # Step 2: Create dataset in dev OR use existing
+                if target_exists_in_dev:
+                    # Use existing dataset
+                    progress_placeholder.progress(0.5, "Using existing dataset in Development...")
+                    status_placeholder.info(f"🔄 Found existing dataset: {target_exists_in_dev.get('id')}")
+                    new_dataset_id = target_exists_in_dev.get('id')
+                else:
+                    # Create new dataset
+                    progress_placeholder.progress(0.5, "Creating dataset in Development...")
+                    status_placeholder.info("🏗️ Creating new dataset in development instance...")
+                    
+                    new_dataset = create_dataset(
+                        DEV_INSTANCE,
+                        target_dataset_name,
+                        schema
+                    )
+                    new_dataset_id = new_dataset.get('id')
                 
                 time.sleep(0.5)
                 
@@ -801,11 +808,13 @@ def main():
                 progress_placeholder.progress(1.0, "Complete!")
                 status_placeholder.empty()
                 
+                action_text = "Data Replaced" if target_exists_in_dev else "Dataset Created"
+                
                 st.markdown(f"""
                 <div class="alert alert-success">
-                    <span class="alert-title">✅ Dataset Copied Successfully!</span><br/>
+                    <span class="alert-title">✅ {action_text} Successfully!</span><br/>
                     <strong>Name:</strong> {target_dataset_name}<br/>
-                    <strong>New Dataset ID:</strong> {new_dataset_id}<br/>
+                    <strong>Dataset ID:</strong> {new_dataset_id}<br/>
                     <strong>Rows Copied:</strong> {len(df):,}<br/>
                     <strong>Target:</strong> <span class="instance-badge instance-dev">DEV</span> {DEV_INSTANCE}
                 </div>
