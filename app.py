@@ -525,7 +525,7 @@ def render_dataset_info(dataset: Dict, schema: List[Dict], exists_in_dev: bool, 
         <div class="alert alert-warning">
             <span class="alert-title">⚠️ Dataset Already Exists in Dev</span><br/>
             A dataset with this name already exists in the dev instance (ID: {dev_dataset.get('id', 'N/A')}).<br/>
-            Copying will create a <strong>new dataset</strong> with the same name.
+            Proceeding will <strong>replace the data</strong> in the existing dataset.
         </div>
         """, unsafe_allow_html=True)
 
