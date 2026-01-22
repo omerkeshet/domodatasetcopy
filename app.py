@@ -351,43 +351,81 @@ def get_dataset_info(instance: str, dataset_id: str) -> Dict:
     return response.json()
 
 
-def export_dataset_data(instance: str, dataset_id: str) -> pd.DataFrame:
-    """Export dataset data as DataFrame."""
+def export_dataset_data(instance: str, dataset_id: str, progress_callback=None) -> pd.DataFrame:
+    """Export dataset data as DataFrame with support for large datasets."""
     token = get_oauth_token(instance)
     
-    url = f"https://api.domo.com/v1/datasets/{dataset_id}/data"
-    headers = get_oauth_headers(token)
-    headers['Accept'] = 'text/csv'
-    
-    response = requests.get(url, headers=headers, timeout=300)
-    response.raise_for_status()
-    
-    # The DOMO API returns CSV without headers - just data
-    # We need to get the schema first to know column names
+    # First get dataset info to know the size
     dataset_info = get_dataset_info(instance, dataset_id)
     schema = dataset_info.get('schema', {}).get('columns', [])
     column_names = [col['name'] for col in schema]
+    total_rows = dataset_info.get('rows', 0)
     
-    # Read CSV - check if it has headers or not
-    csv_text = response.text
+    # For smaller datasets (under 500k rows), use direct export
+    if total_rows < 500000:
+        url = f"https://api.domo.com/v1/datasets/{dataset_id}/data"
+        headers = get_oauth_headers(token)
+        headers['Accept'] = 'text/csv'
+        
+        response = requests.get(url, headers=headers, timeout=300)
+        response.raise_for_status()
+        
+        csv_text = response.text
+        
+        # Detect if CSV has headers
+        first_line = csv_text.split('\n')[0] if csv_text else ""
+        first_line_values = first_line.split(',') if first_line else []
+        
+        has_header = len(first_line_values) == len(column_names) and any(
+            val.strip().strip('"') in column_names for val in first_line_values[:3]
+        )
+        
+        if has_header:
+            df = pd.read_csv(StringIO(csv_text))
+        else:
+            df = pd.read_csv(StringIO(csv_text), header=None, names=column_names)
+        
+        return df
     
-    # Try to detect if first row is header by checking if it matches schema
-    first_line = csv_text.split('\n')[0] if csv_text else ""
-    first_line_values = first_line.split(',') if first_line else []
+    # For large datasets, use SQL query with pagination
+    all_data = []
+    chunk_size = 500000  # 500k rows per chunk
+    offset = 0
     
-    # Check if first line looks like column names (matches schema)
-    has_header = len(first_line_values) == len(column_names) and any(
-        val.strip().strip('"') in column_names for val in first_line_values[:3]
-    )
+    while offset < total_rows:
+        if progress_callback:
+            progress_callback(offset, total_rows)
+        
+        url = f"https://api.domo.com/v1/datasets/query/execute/{dataset_id}"
+        headers = get_oauth_headers(token)
+        
+        payload = {
+            "sql": f"SELECT * FROM table LIMIT {chunk_size} OFFSET {offset}"
+        }
+        
+        response = requests.post(url, headers=headers, json=payload, timeout=600)
+        response.raise_for_status()
+        
+        result = response.json()
+        columns = result.get('columns', [])
+        rows = result.get('rows', [])
+        
+        if not rows:
+            break
+        
+        chunk_df = pd.DataFrame(rows, columns=columns)
+        all_data.append(chunk_df)
+        
+        offset += len(rows)
+        
+        # If we got fewer rows than requested, we're done
+        if len(rows) < chunk_size:
+            break
     
-    if has_header:
-        # CSV has headers
-        df = pd.read_csv(StringIO(csv_text))
+    if all_data:
+        return pd.concat(all_data, ignore_index=True)
     else:
-        # CSV has no headers - use schema column names
-        df = pd.read_csv(StringIO(csv_text), header=None, names=column_names)
-    
-    return df
+        return pd.DataFrame(columns=column_names)
 
 
 def create_dataset(instance: str, name: str, schema: List[Dict]) -> Dict:
@@ -409,19 +447,120 @@ def create_dataset(instance: str, name: str, schema: List[Dict]) -> Dict:
     return response.json()
 
 
-def upload_data_to_dataset(instance: str, dataset_id: str, df: pd.DataFrame) -> bool:
-    """Upload data to a dataset."""
+def upload_data_to_dataset(instance: str, dataset_id: str, df: pd.DataFrame, progress_callback=None) -> bool:
+    """Upload data to a dataset with support for large datasets."""
     token = get_oauth_token(instance)
     
-    url = f"https://api.domo.com/v1/datasets/{dataset_id}/data"
+    total_rows = len(df)
+    
+    # For smaller datasets, upload directly
+    if total_rows < 500000:
+        url = f"https://api.domo.com/v1/datasets/{dataset_id}/data"
+        headers = get_oauth_headers(token)
+        headers['Content-Type'] = 'text/csv'
+        
+        csv_data = df.to_csv(index=False)
+        
+        response = requests.put(url, headers=headers, data=csv_data.encode('utf-8'), timeout=300)
+        response.raise_for_status()
+        return True
+    
+    # For large datasets, use stream API with parts
+    # First, create a stream execution
+    
+    # Get or create stream for this dataset
+    stream_url = f"https://api.domo.com/v1/streams"
     headers = get_oauth_headers(token)
-    headers['Content-Type'] = 'text/csv'
     
-    csv_data = df.to_csv(index=False)
+    # Search for existing stream
+    params = {'limit': 500}
+    response = requests.get(stream_url, headers=headers, params=params, timeout=60)
     
-    response = requests.put(url, headers=headers, data=csv_data.encode('utf-8'), timeout=300)
+    stream_id = None
+    if response.status_code == 200:
+        streams = response.json()
+        for stream in streams:
+            if stream.get('dataSet', {}).get('id') == dataset_id:
+                stream_id = stream.get('id')
+                break
+    
+    # If no stream exists, create one
+    if not stream_id:
+        payload = {
+            "dataSet": {"id": dataset_id},
+            "updateMethod": "REPLACE"
+        }
+        response = requests.post(stream_url, headers=headers, json=payload, timeout=60)
+        if response.status_code in [200, 201]:
+            stream_id = response.json().get('id')
+    
+    if stream_id:
+        # Use stream-based upload
+        return upload_via_stream(instance, stream_id, df, progress_callback)
+    else:
+        # Fallback: try direct upload anyway (might fail for very large datasets)
+        url = f"https://api.domo.com/v1/datasets/{dataset_id}/data"
+        headers = get_oauth_headers(token)
+        headers['Content-Type'] = 'text/csv'
+        
+        csv_data = df.to_csv(index=False)
+        
+        response = requests.put(url, headers=headers, data=csv_data.encode('utf-8'), timeout=600)
+        response.raise_for_status()
+        return True
+
+
+def upload_via_stream(instance: str, stream_id: int, df: pd.DataFrame, progress_callback=None) -> bool:
+    """Upload data via stream API with chunked parts."""
+    token = get_oauth_token(instance)
+    headers = get_oauth_headers(token)
+    
+    # Create execution
+    exec_url = f"https://api.domo.com/v1/streams/{stream_id}/executions"
+    response = requests.post(exec_url, headers=headers, timeout=60)
     response.raise_for_status()
-    return True
+    
+    execution_id = response.json().get('id')
+    
+    # Upload in chunks
+    chunk_size = 500000
+    total_rows = len(df)
+    part_num = 1
+    
+    try:
+        for start_idx in range(0, total_rows, chunk_size):
+            if progress_callback:
+                progress_callback(start_idx, total_rows)
+            
+            end_idx = min(start_idx + chunk_size, total_rows)
+            chunk_df = df.iloc[start_idx:end_idx]
+            
+            csv_data = chunk_df.to_csv(index=False, header=(part_num == 1))
+            
+            part_url = f"https://api.domo.com/v1/streams/{stream_id}/executions/{execution_id}/part/{part_num}"
+            headers_csv = get_oauth_headers(token)
+            headers_csv['Content-Type'] = 'text/csv'
+            
+            response = requests.put(part_url, headers=headers_csv, data=csv_data.encode('utf-8'), timeout=300)
+            response.raise_for_status()
+            
+            part_num += 1
+        
+        # Commit execution
+        commit_url = f"https://api.domo.com/v1/streams/{stream_id}/executions/{execution_id}/commit"
+        response = requests.put(commit_url, headers=headers, timeout=60)
+        response.raise_for_status()
+        
+        return True
+        
+    except Exception as e:
+        # Try to abort execution on failure
+        try:
+            abort_url = f"https://api.domo.com/v1/streams/{stream_id}/executions/{execution_id}/abort"
+            requests.put(abort_url, headers=headers, timeout=30)
+        except:
+            pass
+        raise e
 
 
 def check_dataset_exists_in_dev(dataset_name: str, dev_datasets: List[Dict]) -> Optional[Dict]:
@@ -745,10 +884,19 @@ def main():
             
             try:
                 # Step 1: Export data from prod
-                progress_placeholder.progress(0.2, "Exporting data from Production...")
+                progress_placeholder.progress(0.1, "Exporting data from Production...")
                 status_placeholder.info("📥 Downloading data from production instance...")
                 
-                df = export_dataset_data(PROD_INSTANCE, selected_ds_id)
+                # Get row count first
+                row_count = dataset_info.get('rows', 0)
+                if row_count > 500000:
+                    status_placeholder.info(f"📥 Large dataset detected ({row_count:,} rows). Downloading in chunks...")
+                
+                def export_progress(current, total):
+                    pct = min(0.1 + (current / total) * 0.4, 0.5)
+                    progress_placeholder.progress(pct, f"Exporting: {current:,} / {total:,} rows...")
+                
+                df = export_dataset_data(PROD_INSTANCE, selected_ds_id, progress_callback=export_progress if row_count > 500000 else None)
                 original_count = len(df)
                 
                 # Apply date filter if specified
@@ -799,10 +947,14 @@ def main():
                 time.sleep(0.5)
                 
                 # Step 3: Upload data
-                progress_placeholder.progress(0.8, "Uploading data to Development...")
+                progress_placeholder.progress(0.6, "Uploading data to Development...")
                 status_placeholder.info(f"📤 Uploading {len(df):,} rows to dev instance...")
                 
-                upload_data_to_dataset(DEV_INSTANCE, new_dataset_id, df)
+                def upload_progress(current, total):
+                    pct = min(0.6 + (current / total) * 0.35, 0.95)
+                    progress_placeholder.progress(pct, f"Uploading: {current:,} / {total:,} rows...")
+                
+                upload_data_to_dataset(DEV_INSTANCE, new_dataset_id, df, progress_callback=upload_progress if len(df) > 500000 else None)
                 
                 # Done!
                 progress_placeholder.progress(1.0, "Complete!")
