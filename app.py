@@ -522,28 +522,41 @@ def stream_copy_dataset(
     # Setup target stream for upload
     target_headers = {'Authorization': f'Bearer {target_token}', 'Content-Type': 'application/json'}
     
-    # Get or create stream for target dataset
-    stream_id = None
+    # Always create a new stream for this upload
     stream_url = "https://api.domo.com/v1/streams"
     
-    # Search for existing stream
-    response = requests.get(stream_url, headers=target_headers, params={'limit': 500}, timeout=60)
-    if response.status_code == 200:
-        streams = response.json()
-        for stream in streams:
-            if stream.get('dataSet', {}).get('id') == target_dataset_id:
-                stream_id = stream.get('id')
-                break
+    if status_callback:
+        status_callback(f"🔧 Creating upload stream for dataset {target_dataset_id}...")
     
-    # Create stream if not exists
-    if not stream_id:
-        payload = {"dataSet": {"id": target_dataset_id}, "updateMethod": "REPLACE"}
-        response = requests.post(stream_url, headers=target_headers, json=payload, timeout=60)
-        if response.status_code in [200, 201]:
-            stream_id = response.json().get('id')
+    # Try to create stream for target dataset
+    payload = {"dataSet": {"id": target_dataset_id}, "updateMethod": "REPLACE"}
+    response = requests.post(stream_url, headers=target_headers, json=payload, timeout=60)
+    
+    stream_id = None
+    if response.status_code in [200, 201]:
+        stream_id = response.json().get('id')
+        if status_callback:
+            status_callback(f"✅ Created new stream: {stream_id}")
+    else:
+        # If creation fails (might already exist), search for existing stream
+        if status_callback:
+            status_callback(f"⚠️ Stream creation returned {response.status_code}, searching for existing...")
+        
+        params = {'limit': 500}
+        search_response = requests.get(stream_url, headers=target_headers, params=params, timeout=60)
+        
+        if search_response.status_code == 200:
+            streams = search_response.json()
+            for stream in streams:
+                stream_dataset_id = stream.get('dataSet', {}).get('id')
+                if stream_dataset_id == target_dataset_id:
+                    stream_id = stream.get('id')
+                    if status_callback:
+                        status_callback(f"✅ Found existing stream: {stream_id}")
+                    break
     
     if not stream_id:
-        raise Exception("Failed to create upload stream for target dataset")
+        raise Exception(f"Failed to create/find upload stream. Create response: {response.status_code} - {response.text[:200]}")
     
     # Create execution
     exec_url = f"https://api.domo.com/v1/streams/{stream_id}/executions"
