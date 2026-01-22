@@ -22,6 +22,30 @@ PROD_INSTANCE = "keshet-tv"
 DEV_INSTANCE = "keshet-tv-dev"
 
 # =============================================================================
+# SESSION STATE INITIALIZATION
+# =============================================================================
+
+def init_session_state():
+    """Initialize all session state variables to prevent jumps on rerun."""
+    defaults = {
+        'selected_dataset_id': None,
+        'search_term': '',
+        'use_custom_name': False,
+        'custom_name': '',
+        'selected_date_column': None,
+        'start_date': datetime.now() - timedelta(days=7),
+        'end_date': datetime.now(),
+        'cancel_copy': False,
+        'datasets_loaded': False,
+        'prod_datasets': [],
+        'dev_datasets': [],
+    }
+    
+    for key, default_value in defaults.items():
+        if key not in st.session_state:
+            st.session_state[key] = default_value
+
+# =============================================================================
 # STYLING
 # =============================================================================
 
@@ -458,7 +482,7 @@ def get_oauth_headers(token: str) -> Dict[str, str]:
 # DOMO API FUNCTIONS
 # =============================================================================
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(show_spinner=False, ttl=300)  # Cache for 5 minutes
 def list_datasets(instance: str) -> List[Dict]:
     """List all datasets from a DOMO instance."""
     token = get_oauth_token(instance)
@@ -488,6 +512,7 @@ def list_datasets(instance: str) -> List[Dict]:
     return all_datasets
 
 
+@st.cache_data(show_spinner=False, ttl=60)  # Cache for 1 minute
 def get_dataset_info(instance: str, dataset_id: str) -> Dict:
     """Get detailed information about a specific dataset."""
     token = get_oauth_token(instance)
@@ -768,65 +793,6 @@ def stream_copy_dataset(
                 os.unlink(temp_path)
         except:
             pass
-    """Upload data to a dataset with support for large datasets."""
-    token = get_oauth_token(instance)
-    
-    total_rows = len(df)
-    
-    # For smaller datasets, upload directly
-    if total_rows < 100000:
-        url = f"https://api.domo.com/v1/datasets/{dataset_id}/data"
-        headers = get_oauth_headers(token)
-        headers['Content-Type'] = 'text/csv'
-        
-        csv_data = df.to_csv(index=False)
-        
-        response = requests.put(url, headers=headers, data=csv_data.encode('utf-8'), timeout=300)
-        response.raise_for_status()
-        return True
-    
-    # For large datasets, use stream API with parts
-    headers = get_oauth_headers(token)
-    
-    # Get or create stream for this dataset
-    stream_url = "https://api.domo.com/v1/streams"
-    
-    # Search for existing stream
-    stream_id = None
-    params = {'limit': 500}
-    response = requests.get(stream_url, headers=headers, params=params, timeout=60)
-    
-    if response.status_code == 200:
-        streams = response.json()
-        for stream in streams:
-            if stream.get('dataSet', {}).get('id') == dataset_id:
-                stream_id = stream.get('id')
-                break
-    
-    # If no stream exists, create one
-    if not stream_id:
-        payload = {
-            "dataSet": {"id": dataset_id},
-            "updateMethod": "REPLACE"
-        }
-        response = requests.post(stream_url, headers=headers, json=payload, timeout=60)
-        if response.status_code in [200, 201]:
-            stream_id = response.json().get('id')
-    
-    if stream_id:
-        # Use stream-based upload
-        return upload_via_stream(instance, stream_id, df, progress_callback)
-    else:
-        # Fallback: try direct upload anyway
-        url = f"https://api.domo.com/v1/datasets/{dataset_id}/data"
-        headers = get_oauth_headers(token)
-        headers['Content-Type'] = 'text/csv'
-        
-        csv_data = df.to_csv(index=False)
-        
-        response = requests.put(url, headers=headers, data=csv_data.encode('utf-8'), timeout=600)
-        response.raise_for_status()
-        return True
 
 
 def upload_data_to_dataset(instance: str, dataset_id: str, df: pd.DataFrame, progress_callback=None) -> bool:
@@ -1077,6 +1043,26 @@ def render_schema_preview(schema: List[Dict], date_columns: List[str]):
 
 
 # =============================================================================
+# HELPER FUNCTIONS FOR SELECTION PERSISTENCE
+# =============================================================================
+
+def get_selection_index(options: List[str], saved_id: Optional[str], dataset_options: Dict[str, str]) -> int:
+    """Find index of previously selected dataset in filtered list."""
+    if saved_id:
+        for i, opt in enumerate(options):
+            if dataset_options.get(opt) == saved_id:
+                return i
+    return 0
+
+
+def get_date_column_index(date_columns: List[str], saved_column: Optional[str]) -> int:
+    """Find index of previously selected date column."""
+    if saved_column and saved_column in date_columns:
+        return date_columns.index(saved_column)
+    return 0
+
+
+# =============================================================================
 # MAIN APPLICATION
 # =============================================================================
 
@@ -1088,15 +1074,21 @@ def main():
         initial_sidebar_state="collapsed"
     )
     
+    # Initialize session state FIRST
+    init_session_state()
+    
     apply_custom_css()
     render_header()
     
-    # Load datasets from both instances
+    # Load datasets from both instances (cached)
     try:
-        with st.spinner("Loading datasets from Production..."):
-            prod_datasets = list_datasets(PROD_INSTANCE)
-        with st.spinner("Loading datasets from Development..."):
-            dev_datasets = list_datasets(DEV_INSTANCE)
+        prod_datasets = list_datasets(PROD_INSTANCE)
+        dev_datasets = list_datasets(DEV_INSTANCE)
+        
+        # Store in session state for reference
+        st.session_state.prod_datasets = prod_datasets
+        st.session_state.dev_datasets = dev_datasets
+        st.session_state.datasets_loaded = True
     except Exception as e:
         st.error(f"Failed to load datasets: {e}")
         st.exception(e)
@@ -1132,8 +1124,9 @@ def main():
     
     with refresh_col:
         st.markdown("<div style='height: 0.5rem'></div>", unsafe_allow_html=True)
-        if st.button("Refresh", use_container_width=True, help="Refresh dataset lists from DOMO"):
+        if st.button("Refresh", use_container_width=True, help="Refresh dataset lists from DOMO", key="refresh_btn"):
             list_datasets.clear()
+            get_dataset_info.clear()
             st.rerun()
     
     st.markdown('<div class="divider"></div>', unsafe_allow_html=True)
@@ -1152,9 +1145,17 @@ def main():
         # Create options for selectbox
         dataset_options = {f"{ds['name']} ({ds['id'][:8]}...)": ds['id'] for ds in prod_datasets}
         
-        # Search filter
+        # Search filter with session state
         st.markdown("**Search Production Datasets**")
-        search_term = st.text_input("Search", "", placeholder="Filter by name or ID", key="ds_search", label_visibility="collapsed")
+        search_term = st.text_input(
+            "Search", 
+            value=st.session_state.search_term,
+            placeholder="Filter by name or ID", 
+            key="ds_search", 
+            label_visibility="collapsed"
+        )
+        # Update session state
+        st.session_state.search_term = search_term
         
         if search_term:
             filtered_options = [opt for opt in dataset_options.keys() if search_term.lower() in opt.lower()]
@@ -1165,8 +1166,22 @@ def main():
             st.warning("No matching datasets found")
             return
         
-        selected = st.selectbox("Dataset", filtered_options, label_visibility="collapsed", key="ds_select")
+        # Get the index of previously selected dataset
+        selection_index = get_selection_index(filtered_options, st.session_state.selected_dataset_id, dataset_options)
+        # Ensure index is within bounds
+        selection_index = min(selection_index, len(filtered_options) - 1)
+        
+        selected = st.selectbox(
+            "Dataset", 
+            filtered_options, 
+            index=selection_index,
+            label_visibility="collapsed", 
+            key="ds_select"
+        )
+        
+        # Save the selection to session state
         selected_ds_id = dataset_options[selected]
+        st.session_state.selected_dataset_id = selected_ds_id
         
         st.markdown('<div class="divider"></div>', unsafe_allow_html=True)
         
@@ -1187,14 +1202,25 @@ def main():
         
         default_name = dataset_info.get('name', '')
         
-        use_custom_name = st.checkbox("Use different name in Dev", value=False, key="use_custom_name")
+        use_custom_name = st.checkbox(
+            "Use different name in Dev", 
+            value=st.session_state.use_custom_name, 
+            key="use_custom_name_cb"
+        )
+        st.session_state.use_custom_name = use_custom_name
         
         if use_custom_name:
+            # Initialize custom name with default if empty
+            if not st.session_state.custom_name:
+                st.session_state.custom_name = default_name
+            
             target_dataset_name = st.text_input(
                 "New Dataset Name",
-                value=default_name,
-                key="custom_name"
+                value=st.session_state.custom_name,
+                key="custom_name_input"
             )
+            st.session_state.custom_name = target_dataset_name
+            
             if not target_dataset_name.strip():
                 st.warning("Dataset name cannot be empty")
                 target_dataset_name = default_name
@@ -1216,22 +1242,35 @@ def main():
         st.markdown('<div class="section-title">Date Filter</div>', unsafe_allow_html=True)
         
         if date_columns:
+            # Get index of previously selected date column
+            date_col_index = get_date_column_index(date_columns, st.session_state.selected_date_column)
+            
             selected_date_column = st.selectbox(
                 "Date Column",
                 options=date_columns,
+                index=date_col_index,
                 key="date_col_select"
             )
+            st.session_state.selected_date_column = selected_date_column
             
             st.markdown("**Date Range**")
             date_col1, date_col2 = st.columns(2)
             
-            default_start = datetime.now() - timedelta(days=7)
-            default_end = datetime.now()
-            
             with date_col1:
-                start_date = st.date_input("Start", value=default_start, key="start_date")
+                start_date = st.date_input(
+                    "Start", 
+                    value=st.session_state.start_date, 
+                    key="start_date_input"
+                )
+                st.session_state.start_date = start_date
+                
             with date_col2:
-                end_date = st.date_input("End", value=default_end, key="end_date")
+                end_date = st.date_input(
+                    "End", 
+                    value=st.session_state.end_date, 
+                    key="end_date_input"
+                )
+                st.session_state.end_date = end_date
             
             st.markdown(f"""
             <div class="alert alert-info">
@@ -1289,12 +1328,10 @@ def main():
             </div>
             """, unsafe_allow_html=True)
         
-        copy_button = st.button("Copy to Development", type="primary", use_container_width=True)
+        copy_button = st.button("Copy to Development", type="primary", use_container_width=True, key="copy_btn")
         
         if copy_button:
-            # Initialize cancel state
-            if 'cancel_copy' not in st.session_state:
-                st.session_state.cancel_copy = False
+            # Reset cancel state
             st.session_state.cancel_copy = False
             
             progress_placeholder = st.empty()
