@@ -485,8 +485,12 @@ def stream_copy_dataset(
 ) -> int:
     """
     Stream data directly from source to target without loading all into memory.
+    Fetches chunks from source, writes to temp file, then uploads to target.
     Returns total rows copied.
     """
+    import tempfile
+    import os
+    
     source_token = get_oauth_token(source_instance)
     target_token = get_oauth_token(target_instance)
     
@@ -519,69 +523,26 @@ def stream_copy_dataset(
     if status_callback:
         status_callback(f"📊 Total rows to copy: {total_rows:,}")
     
-    # Setup target stream for upload
-    target_headers = {'Authorization': f'Bearer {target_token}', 'Content-Type': 'application/json'}
-    
-    # Always create a new stream for this upload
-    stream_url = "https://api.domo.com/v1/streams"
-    
-    if status_callback:
-        status_callback(f"🔧 Creating upload stream for dataset {target_dataset_id}...")
-    
-    # Try to create stream for target dataset
-    payload = {"dataSet": {"id": target_dataset_id}, "updateMethod": "REPLACE"}
-    response = requests.post(stream_url, headers=target_headers, json=payload, timeout=60)
-    
-    stream_id = None
-    if response.status_code in [200, 201]:
-        stream_id = response.json().get('id')
-        if status_callback:
-            status_callback(f"✅ Created new stream: {stream_id}")
-    else:
-        # If creation fails (might already exist), search for existing stream
-        if status_callback:
-            status_callback(f"⚠️ Stream creation returned {response.status_code}, searching for existing...")
-        
-        params = {'limit': 500}
-        search_response = requests.get(stream_url, headers=target_headers, params=params, timeout=60)
-        
-        if search_response.status_code == 200:
-            streams = search_response.json()
-            for stream in streams:
-                stream_dataset_id = stream.get('dataSet', {}).get('id')
-                if stream_dataset_id == target_dataset_id:
-                    stream_id = stream.get('id')
-                    if status_callback:
-                        status_callback(f"✅ Found existing stream: {stream_id}")
-                    break
-    
-    if not stream_id:
-        raise Exception(f"Failed to create/find upload stream. Create response: {response.status_code} - {response.text[:200]}")
-    
-    # Create execution
-    exec_url = f"https://api.domo.com/v1/streams/{stream_id}/executions"
-    response = requests.post(exec_url, headers=target_headers, timeout=60)
-    response.raise_for_status()
-    execution_id = response.json().get('id')
-    
-    if status_callback:
-        status_callback(f"🚀 Started upload stream (execution {execution_id})")
-    
-    # Stream data in chunks
-    chunk_size = 100000  # 100k rows per chunk
-    offset = 0
-    part_num = 1
-    total_copied = 0
-    
-    source_headers = {'Authorization': f'Bearer {source_token}', 'Content-Type': 'application/json'}
+    # Create temp file to store CSV data
+    temp_file = tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False, encoding='utf-8')
+    temp_path = temp_file.name
     
     try:
+        # Stream data in chunks to temp file
+        chunk_size = 100000  # 100k rows per chunk
+        offset = 0
+        chunk_num = 1
+        total_copied = 0
+        header_written = False
+        
+        source_headers = {'Authorization': f'Bearer {source_token}', 'Content-Type': 'application/json'}
+        
         while offset < total_rows:
             if progress_callback:
                 progress_callback(offset, total_rows)
             
             if status_callback:
-                status_callback(f"📥 Fetching rows {offset:,} - {min(offset + chunk_size, total_rows):,}...")
+                status_callback(f"📥 Fetching chunk {chunk_num} (rows {offset:,} - {min(offset + chunk_size, total_rows):,})...")
             
             # Fetch chunk from source
             sql = f"SELECT * FROM table {where_clause} LIMIT {chunk_size} OFFSET {offset}"
@@ -597,51 +558,56 @@ def stream_copy_dataset(
             if not rows:
                 break
             
-            # Convert to CSV
+            # Convert to CSV and write to temp file
             chunk_df = pd.DataFrame(rows, columns=columns)
-            csv_data = chunk_df.to_csv(index=False, header=(part_num == 1))
+            chunk_df.to_csv(temp_file, index=False, header=not header_written, mode='a')
+            header_written = True
             
-            # Immediately upload to target
-            if status_callback:
-                status_callback(f"📤 Uploading part {part_num} ({len(rows):,} rows)...")
-            
-            part_url = f"https://api.domo.com/v1/streams/{stream_id}/executions/{execution_id}/part/{part_num}"
-            upload_headers = {'Authorization': f'Bearer {target_token}', 'Content-Type': 'text/csv'}
-            
-            response = requests.put(part_url, headers=upload_headers, data=csv_data.encode('utf-8'), timeout=300)
-            response.raise_for_status()
+            rows_in_chunk = len(rows)
+            total_copied += rows_in_chunk
             
             # Free memory
             del chunk_df
-            del csv_data
             del rows
+            del result
             
-            total_copied += len(result.get('rows', []))
             offset += chunk_size
-            part_num += 1
+            chunk_num += 1
             
             # Check if we got fewer rows than requested (end of data)
-            if len(result.get('rows', [])) < chunk_size:
+            if rows_in_chunk < chunk_size:
                 break
         
-        # Commit the execution
-        if status_callback:
-            status_callback(f"✅ Committing upload ({total_copied:,} rows)...")
+        # Close temp file
+        temp_file.close()
         
-        commit_url = f"https://api.domo.com/v1/streams/{stream_id}/executions/{execution_id}/commit"
-        response = requests.put(commit_url, headers=target_headers, timeout=120)
-        response.raise_for_status()
+        if status_callback:
+            status_callback(f"📤 Uploading {total_copied:,} rows to target...")
+        
+        if progress_callback:
+            progress_callback(total_rows, total_rows)
+        
+        # Upload the temp file to target
+        target_headers = {'Authorization': f'Bearer {target_token}', 'Content-Type': 'text/csv'}
+        upload_url = f"https://api.domo.com/v1/datasets/{target_dataset_id}/data"
+        
+        # Read and upload in streaming fashion
+        with open(temp_path, 'rb') as f:
+            response = requests.put(upload_url, headers=target_headers, data=f, timeout=600)
+            response.raise_for_status()
+        
+        if status_callback:
+            status_callback(f"✅ Upload complete ({total_copied:,} rows)")
         
         return total_copied
         
-    except Exception as e:
-        # Abort execution on failure
+    finally:
+        # Clean up temp file
         try:
-            abort_url = f"https://api.domo.com/v1/streams/{stream_id}/executions/{execution_id}/abort"
-            requests.put(abort_url, headers=target_headers, timeout=30)
+            if os.path.exists(temp_path):
+                os.unlink(temp_path)
         except:
             pass
-        raise e
     """Upload data to a dataset with support for large datasets."""
     token = get_oauth_token(instance)
     
