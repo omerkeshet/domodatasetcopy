@@ -31,28 +31,33 @@ def apply_custom_css():
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
     
     :root {
-        --primary: #4a5568;
-        --primary-dark: #2d3748;
-        --accent: #5a67d8;
-        --success: #48bb78;
-        --success-bg: #f0fff4;
-        --success-border: #9ae6b4;
-        --warning: #ed8936;
-        --warning-bg: #fffaf0;
-        --warning-border: #fbd38d;
-        --error: #e53e3e;
-        --error-bg: #fff5f5;
-        --error-border: #feb2b2;
-        --info: #4299e1;
-        --info-bg: #ebf8ff;
-        --info-border: #90cdf4;
-        --bg-primary: #f7fafc;
+        --primary: #0f172a;
+        --primary-light: #1e293b;
+        --accent: #3b82f6;
+        --accent-hover: #2563eb;
+        --success: #10b981;
+        --success-bg: #ecfdf5;
+        --success-border: #a7f3d0;
+        --warning: #f59e0b;
+        --warning-bg: #fffbeb;
+        --warning-border: #fde68a;
+        --error: #ef4444;
+        --error-bg: #fef2f2;
+        --error-border: #fecaca;
+        --info: #3b82f6;
+        --info-bg: #eff6ff;
+        --info-border: #bfdbfe;
+        --bg-primary: #f8fafc;
         --bg-secondary: #ffffff;
-        --bg-tertiary: #edf2f7;
-        --text-primary: #1a202c;
-        --text-secondary: #718096;
-        --text-muted: #a0aec0;
+        --bg-tertiary: #f1f5f9;
+        --text-primary: #0f172a;
+        --text-secondary: #475569;
+        --text-muted: #94a3b8;
         --border-color: #e2e8f0;
+        --border-radius: 12px;
+        --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+        --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+        --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
     }
     
     .stApp {
@@ -61,204 +66,322 @@ def apply_custom_css():
     }
     
     .app-header {
-        background: linear-gradient(135deg, var(--primary-dark) 0%, var(--primary) 100%);
-        padding: 2rem 2.5rem;
-        border-radius: 8px;
+        background: var(--primary);
+        padding: 2.5rem 3rem;
+        border-radius: var(--border-radius);
         margin-bottom: 2rem;
-        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+        box-shadow: var(--shadow-lg);
+        position: relative;
+        overflow: hidden;
+    }
+    
+    .app-header::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        right: 0;
+        width: 40%;
+        height: 100%;
+        background: linear-gradient(135deg, transparent 0%, rgba(59, 130, 246, 0.1) 100%);
     }
     
     .app-title {
         color: #ffffff !important;
-        font-size: 1.5rem;
+        font-size: 1.75rem;
         font-weight: 600;
         margin: 0;
+        letter-spacing: -0.025em;
     }
     
     .app-subtitle {
-        color: rgba(255,255,255,0.85) !important;
-        font-size: 0.875rem;
+        color: rgba(255,255,255,0.7) !important;
+        font-size: 0.9rem;
         margin-top: 0.5rem;
+        font-weight: 400;
     }
     
     .metric-box {
         background: var(--bg-secondary);
-        border-radius: 6px;
-        padding: 1rem 1.25rem;
+        border-radius: var(--border-radius);
+        padding: 1.5rem;
         border: 1px solid var(--border-color);
         text-align: center;
+        transition: all 0.2s ease;
+        box-shadow: var(--shadow-sm);
+    }
+    
+    .metric-box:hover {
+        box-shadow: var(--shadow-md);
+        border-color: var(--accent);
     }
     
     .metric-value {
-        font-size: 1.125rem;
-        font-weight: 600;
+        font-size: 1.5rem;
+        font-weight: 700;
         color: var(--text-primary);
         margin-bottom: 0.25rem;
+        letter-spacing: -0.025em;
     }
     
     .metric-label {
         font-size: 0.75rem;
-        color: var(--text-secondary);
+        color: var(--text-muted);
         text-transform: uppercase;
-        letter-spacing: 0.05em;
+        letter-spacing: 0.1em;
+        font-weight: 500;
     }
     
     .status-indicator {
         display: inline-flex;
         align-items: center;
-        padding: 0.25rem 0.75rem;
-        border-radius: 4px;
-        font-size: 0.75rem;
-        font-weight: 500;
+        padding: 0.375rem 0.875rem;
+        border-radius: 9999px;
+        font-size: 0.7rem;
+        font-weight: 600;
         text-transform: uppercase;
+        letter-spacing: 0.05em;
     }
     
     .status-exists {
         background: var(--warning-bg);
-        color: #c05621;
+        color: #b45309;
         border: 1px solid var(--warning-border);
     }
     
     .status-new {
         background: var(--success-bg);
-        color: #276749;
+        color: #047857;
         border: 1px solid var(--success-border);
     }
     
     .alert {
-        border-radius: 6px;
-        padding: 1rem;
+        border-radius: var(--border-radius);
+        padding: 1rem 1.25rem;
         margin: 0.75rem 0;
         font-size: 0.875rem;
+        line-height: 1.5;
     }
     
     .alert-info {
         background: var(--info-bg);
         border: 1px solid var(--info-border);
-        color: #2c5282;
+        color: #1e40af;
     }
     
     .alert-warning {
         background: var(--warning-bg);
         border: 1px solid var(--warning-border);
-        color: #744210;
+        color: #92400e;
     }
     
     .alert-success {
         background: var(--success-bg);
         border: 1px solid var(--success-border);
-        color: #22543d;
+        color: #065f46;
     }
     
     .alert-error {
         background: var(--error-bg);
         border: 1px solid var(--error-border);
-        color: #742a2a;
+        color: #991b1b;
     }
     
     .alert-title {
         font-weight: 600;
-        margin-bottom: 0.25rem;
+        margin-bottom: 0.375rem;
+        display: block;
     }
     
     .dataset-card {
         background: var(--bg-secondary);
         border: 1px solid var(--border-color);
-        border-radius: 8px;
-        padding: 1.25rem;
+        border-radius: var(--border-radius);
+        padding: 1.5rem;
         margin-bottom: 1rem;
-        box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1);
+        box-shadow: var(--shadow-sm);
+        transition: all 0.2s ease;
+    }
+    
+    .dataset-card:hover {
+        box-shadow: var(--shadow-md);
     }
     
     .dataset-card-header {
         display: flex;
         justify-content: space-between;
-        align-items: center;
-        margin-bottom: 1rem;
+        align-items: flex-start;
+        margin-bottom: 1.25rem;
+        padding-bottom: 1rem;
+        border-bottom: 1px solid var(--border-color);
     }
     
     .dataset-card-title {
-        font-size: 1rem;
+        font-size: 1.125rem;
         font-weight: 600;
         color: var(--text-primary);
+        letter-spacing: -0.025em;
     }
     
     .dataset-card-id {
         font-family: 'JetBrains Mono', monospace;
         font-size: 0.75rem;
         color: var(--text-muted);
+        margin-top: 0.25rem;
     }
     
     .dataset-card-details {
         display: grid;
         grid-template-columns: repeat(3, 1fr);
-        gap: 1rem;
+        gap: 1.5rem;
     }
     
     .dataset-card-detail {
         text-align: center;
+        padding: 0.75rem;
+        background: var(--bg-tertiary);
+        border-radius: 8px;
     }
     
     .dataset-card-detail-value {
-        font-size: 1rem;
-        font-weight: 600;
+        font-size: 1.125rem;
+        font-weight: 700;
         color: var(--text-primary);
     }
     
     .dataset-card-detail-label {
-        font-size: 0.7rem;
-        color: var(--text-secondary);
+        font-size: 0.65rem;
+        color: var(--text-muted);
         text-transform: uppercase;
-        letter-spacing: 0.05em;
+        letter-spacing: 0.1em;
+        margin-top: 0.25rem;
+        font-weight: 500;
     }
     
     .section-title {
-        font-size: 0.875rem;
+        font-size: 0.75rem;
         font-weight: 600;
-        color: var(--text-primary);
+        color: var(--text-secondary);
         text-transform: uppercase;
-        letter-spacing: 0.05em;
+        letter-spacing: 0.1em;
         margin-bottom: 1rem;
-        padding-bottom: 0.5rem;
-        border-bottom: 2px solid var(--border-color);
+        padding-bottom: 0.75rem;
+        border-bottom: 1px solid var(--border-color);
     }
     
     .column-item {
         background: var(--bg-tertiary);
-        border-radius: 4px;
-        padding: 0.5rem 0.75rem;
-        margin: 0.25rem 0;
+        border-radius: 8px;
+        padding: 0.625rem 0.875rem;
+        margin: 0.375rem 0;
         font-family: 'JetBrains Mono', monospace;
         font-size: 0.8rem;
         display: flex;
         justify-content: space-between;
         align-items: center;
+        transition: all 0.15s ease;
     }
     
-    .column-name { color: var(--text-primary); }
-    .column-type { color: var(--text-muted); font-size: 0.7rem; }
+    .column-item:hover {
+        background: var(--border-color);
+    }
+    
+    .column-name { 
+        color: var(--text-primary); 
+        font-weight: 500;
+    }
+    
+    .column-type { 
+        color: var(--text-muted); 
+        font-size: 0.7rem;
+        background: var(--bg-secondary);
+        padding: 0.125rem 0.5rem;
+        border-radius: 4px;
+    }
     
     .instance-badge {
         display: inline-flex;
-        padding: 0.25rem 0.5rem;
-        border-radius: 4px;
-        font-size: 0.7rem;
+        padding: 0.25rem 0.625rem;
+        border-radius: 6px;
+        font-size: 0.65rem;
         font-weight: 600;
         text-transform: uppercase;
+        letter-spacing: 0.05em;
     }
     
-    .instance-prod { background: #fed7d7; color: #c53030; }
-    .instance-dev { background: #c6f6d5; color: #276749; }
+    .instance-prod { 
+        background: #fef2f2; 
+        color: #dc2626; 
+    }
+    
+    .instance-dev { 
+        background: #ecfdf5; 
+        color: #059669; 
+    }
     
     .divider {
         height: 1px;
         background: var(--border-color);
-        margin: 1.5rem 0;
+        margin: 2rem 0;
     }
     
+    /* Button styling */
+    .stButton > button {
+        background: var(--accent) !important;
+        color: white !important;
+        border: none !important;
+        border-radius: 8px !important;
+        padding: 0.625rem 1.25rem !important;
+        font-weight: 500 !important;
+        font-size: 0.875rem !important;
+        transition: all 0.2s ease !important;
+        box-shadow: var(--shadow-sm) !important;
+    }
+    
+    .stButton > button:hover {
+        background: var(--accent-hover) !important;
+        box-shadow: var(--shadow-md) !important;
+        transform: translateY(-1px);
+    }
+    
+    .stButton > button:active {
+        transform: translateY(0);
+    }
+    
+    /* Input styling */
+    .stTextInput > div > div > input,
+    .stSelectbox > div > div > div {
+        border-radius: 8px !important;
+        border-color: var(--border-color) !important;
+        font-size: 0.875rem !important;
+    }
+    
+    .stTextInput > div > div > input:focus,
+    .stSelectbox > div > div > div:focus {
+        border-color: var(--accent) !important;
+        box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1) !important;
+    }
+    
+    /* Progress bar */
+    .stProgress > div > div > div {
+        background: var(--accent) !important;
+    }
+    
+    /* Hide Streamlit branding */
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
     .stDeployButton {display: none;}
+    header {visibility: hidden;}
+    
+    /* Checkbox styling */
+    .stCheckbox > label {
+        font-size: 0.875rem !important;
+        color: var(--text-secondary) !important;
+    }
+    
+    /* Date input styling */
+    .stDateInput > div > div > input {
+        border-radius: 8px !important;
+    }
     </style>
     """, unsafe_allow_html=True)
 
@@ -521,7 +644,7 @@ def stream_copy_dataset(
             pass
     
     if status_callback:
-        status_callback(f"📊 Total rows to copy: {total_rows:,}")
+        status_callback(f"Total rows to copy: {total_rows:,}")
     
     # Create temp file to store CSV data
     temp_file = tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False, encoding='utf-8')
@@ -542,7 +665,7 @@ def stream_copy_dataset(
                 progress_callback(offset, total_rows)
             
             if status_callback:
-                status_callback(f"📥 Fetching chunk {chunk_num} (rows {offset:,} - {min(offset + chunk_size, total_rows):,})...")
+                status_callback(f"Fetching chunk {chunk_num} (rows {offset:,} - {min(offset + chunk_size, total_rows):,})...")
             
             # Fetch chunk from source
             sql = f"SELECT * FROM table {where_clause} LIMIT {chunk_size} OFFSET {offset}"
@@ -582,7 +705,7 @@ def stream_copy_dataset(
         temp_file.close()
         
         if status_callback:
-            status_callback(f"📤 Uploading {total_copied:,} rows to target...")
+            status_callback(f"Uploading {total_copied:,} rows to target...")
         
         if progress_callback:
             progress_callback(total_rows, total_rows)
@@ -597,7 +720,7 @@ def stream_copy_dataset(
             response.raise_for_status()
         
         if status_callback:
-            status_callback(f"✅ Upload complete ({total_copied:,} rows)")
+            status_callback(f"Upload complete ({total_copied:,} rows)")
         
         return total_copied
         
@@ -813,8 +936,8 @@ def format_row_count(count) -> str:
 def render_header():
     st.markdown(f"""
     <div class="app-header">
-        <h1 class="app-title">📦 {APP_NAME}</h1>
-        <p class="app-subtitle">Copy datasets from Production ({PROD_INSTANCE}) to Development ({DEV_INSTANCE})</p>
+        <h1 class="app-title">{APP_NAME}</h1>
+        <p class="app-subtitle">Transfer datasets from Production to Development environment</p>
     </div>
     """, unsafe_allow_html=True)
 
@@ -884,7 +1007,7 @@ def render_dataset_info(dataset: Dict, schema: List[Dict], exists_in_dev: bool, 
     if exists_in_dev and dev_dataset:
         st.markdown(f"""
         <div class="alert alert-warning">
-            <span class="alert-title">⚠️ Dataset Already Exists in Dev</span><br/>
+            <span class="alert-title">Dataset Already Exists</span><br/>
             A dataset with this name already exists in the dev instance (ID: {dev_dataset.get('id', 'N/A')}).<br/>
             Proceeding will <strong>replace the data</strong> in the existing dataset.
         </div>
@@ -900,7 +1023,7 @@ def render_schema_preview(schema: List[Dict], date_columns: List[str]):
     
     for col in schema[:10]:
         is_date = col['name'] in date_columns
-        date_indicator = " 📅" if is_date else ""
+        date_indicator = " " if is_date else ""
         st.markdown(f"""
         <div class="column-item">
             <span class="column-name">{col['name']}{date_indicator}</span>
@@ -923,7 +1046,7 @@ def render_schema_preview(schema: List[Dict], date_columns: List[str]):
 def main():
     st.set_page_config(
         page_title=APP_NAME,
-        page_icon="📦",
+        page_icon="◈",
         layout="wide",
         initial_sidebar_state="collapsed"
     )
@@ -972,7 +1095,7 @@ def main():
     
     with refresh_col:
         st.markdown("<div style='height: 0.5rem'></div>", unsafe_allow_html=True)
-        if st.button("🔄 Refresh", use_container_width=True, help="Refresh dataset lists from DOMO"):
+        if st.button("Refresh", use_container_width=True, help="Refresh dataset lists from DOMO"):
             list_datasets.clear()
             st.rerun()
     
@@ -1105,7 +1228,7 @@ def main():
         if use_custom_name and target_dataset_name != dataset_info.get('name', ''):
             st.markdown(f"""
             <div class="alert alert-info">
-                <span class="alert-title">📝 New Name in Dev</span><br/>
+                <span class="alert-title">New Name in Dev</span><br/>
                 <code>{target_dataset_name}</code>
             </div>
             """, unsafe_allow_html=True)
@@ -1123,13 +1246,13 @@ def main():
         if target_exists_in_dev:
             st.markdown(f"""
             <div class="alert alert-warning">
-                <span class="alert-title">⚠️ Dataset Already Exists</span><br/>
+                <span class="alert-title">Dataset Already Exists</span><br/>
                 A dataset named "<strong>{target_dataset_name}</strong>" already exists in dev (ID: {target_exists_in_dev.get('id', 'N/A')}).<br/>
                 Proceeding will <strong>replace the data</strong> in the existing dataset.
             </div>
             """, unsafe_allow_html=True)
         
-        copy_button = st.button("🚀 Copy Dataset to Dev", type="primary", use_container_width=True)
+        copy_button = st.button("Copy to Development", type="primary", use_container_width=True)
         
         if copy_button:
             progress_placeholder = st.empty()
@@ -1142,14 +1265,14 @@ def main():
                 # For large datasets (> 500k rows), use streaming
                 if row_count > 500000:
                     progress_placeholder.progress(0.05, "Preparing streaming copy...")
-                    status_placeholder.info(f"📊 Large dataset detected ({row_count:,} rows). Using streaming mode...")
+                    status_placeholder.info(f"Large dataset detected ({row_count:,} rows). Using streaming mode...")
                     
                     # Step 1: Create or get target dataset
                     if target_exists_in_dev:
                         new_dataset_id = target_exists_in_dev.get('id')
-                        status_placeholder.info(f"🔄 Using existing dataset: {new_dataset_id}")
+                        status_placeholder.info(f"Using existing dataset: {new_dataset_id}")
                     else:
-                        status_placeholder.info("🏗️ Creating new dataset in development instance...")
+                        status_placeholder.info("Creating new dataset in development instance...")
                         new_dataset = create_dataset(DEV_INSTANCE, target_dataset_name, schema)
                         new_dataset_id = new_dataset.get('id')
                     
@@ -1181,7 +1304,7 @@ def main():
                     
                     st.markdown(f"""
                     <div class="alert alert-success">
-                        <span class="alert-title">✅ {action_text} Successfully!</span><br/>
+                        <span class="alert-title">{action_text} Successfully!</span><br/>
                         <strong>Name:</strong> {target_dataset_name}<br/>
                         <strong>Dataset ID:</strong> {new_dataset_id}<br/>
                         <strong>Rows Copied:</strong> {total_copied:,}<br/>
@@ -1194,7 +1317,7 @@ def main():
                     # For smaller datasets, use the original method
                     # Step 1: Export data from prod
                     progress_placeholder.progress(0.1, "Exporting data from Production...")
-                    status_placeholder.info("📥 Downloading data from production instance...")
+                    status_placeholder.info(" Downloading data from production instance...")
                     
                     def export_progress(current, total):
                         pct = min(0.1 + (current / total) * 0.4, 0.5)
@@ -1211,18 +1334,18 @@ def main():
                     )
                     original_count = len(df)
                     
-                    status_placeholder.info(f"📊 Exported {original_count:,} rows")
+                    status_placeholder.info(f"Exported {original_count:,} rows")
                     
                     time.sleep(0.5)
                     
                     # Step 2: Create dataset in dev OR use existing
                     if target_exists_in_dev:
                         progress_placeholder.progress(0.5, "Using existing dataset in Development...")
-                        status_placeholder.info(f"🔄 Found existing dataset: {target_exists_in_dev.get('id')}")
+                        status_placeholder.info(f"Found existing dataset: {target_exists_in_dev.get('id')}")
                         new_dataset_id = target_exists_in_dev.get('id')
                     else:
                         progress_placeholder.progress(0.5, "Creating dataset in Development...")
-                        status_placeholder.info("🏗️ Creating new dataset in development instance...")
+                        status_placeholder.info("Creating new dataset in development instance...")
                         
                         new_dataset = create_dataset(DEV_INSTANCE, target_dataset_name, schema)
                         new_dataset_id = new_dataset.get('id')
@@ -1231,7 +1354,7 @@ def main():
                     
                     # Step 3: Upload data
                     progress_placeholder.progress(0.6, "Uploading data to Development...")
-                    status_placeholder.info(f"📤 Uploading {len(df):,} rows to dev instance...")
+                    status_placeholder.info(f"Uploading {len(df):,} rows to dev instance...")
                     
                     def upload_progress(current, total):
                         pct = min(0.6 + (current / total) * 0.35, 0.95)
@@ -1247,7 +1370,7 @@ def main():
                     
                     st.markdown(f"""
                     <div class="alert alert-success">
-                        <span class="alert-title">✅ {action_text} Successfully!</span><br/>
+                        <span class="alert-title">{action_text} Successfully!</span><br/>
                         <strong>Name:</strong> {target_dataset_name}<br/>
                         <strong>Dataset ID:</strong> {new_dataset_id}<br/>
                         <strong>Rows Copied:</strong> {len(df):,}<br/>
@@ -1260,7 +1383,7 @@ def main():
                 status_placeholder.empty()
                 st.markdown(f"""
                 <div class="alert alert-error">
-                    <span class="alert-title">❌ Copy Failed</span><br/>
+                    <span class="alert-title">Copy Failed</span><br/>
                     Error: {str(e)}
                 </div>
                 """, unsafe_allow_html=True)
