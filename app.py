@@ -361,9 +361,15 @@ def apply_custom_css():
         box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1) !important;
     }
     
-    /* Progress bar */
+    /* Progress bar - fix to show actual progress */
+    .stProgress > div > div {
+        background-color: var(--bg-tertiary) !important;
+        border-radius: 10px !important;
+    }
+    
     .stProgress > div > div > div {
-        background: var(--accent) !important;
+        background: linear-gradient(90deg, var(--accent) 0%, #60a5fa 100%) !important;
+        border-radius: 10px !important;
     }
     
     /* Hide Streamlit branding */
@@ -371,6 +377,24 @@ def apply_custom_css():
     footer {visibility: hidden;}
     .stDeployButton {display: none;}
     header {visibility: hidden;}
+    
+    /* Hide the stale/duplicate UI that appears during script reruns */
+    [data-stale="true"] {
+        display: none !important;
+    }
+    
+    .stale-element {
+        display: none !important;
+    }
+    
+    /* Alternative: make stale elements invisible instead of taking space */
+    div[data-stale="true"] {
+        visibility: hidden !important;
+        height: 0 !important;
+        overflow: hidden !important;
+        margin: 0 !important;
+        padding: 0 !important;
+    }
     
     /* Checkbox styling */
     .stCheckbox > label {
