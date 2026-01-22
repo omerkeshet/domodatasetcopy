@@ -311,7 +311,7 @@ def get_oauth_headers(token: str) -> Dict[str, str]:
 # DOMO API FUNCTIONS
 # =============================================================================
 
-@st.cache_data(ttl=300)
+@st.cache_data(show_spinner=False)
 def list_datasets(instance: str) -> List[Dict]:
     """List all datasets from a DOMO instance."""
     token = get_oauth_token(instance)
@@ -745,8 +745,39 @@ def main():
         st.exception(e)
         return
     
-    # Render metrics
-    render_instance_metrics(len(prod_datasets), len(dev_datasets))
+    # Render metrics with refresh button
+    metric_col1, metric_col2, metric_col3, refresh_col = st.columns([1, 1, 1, 0.5])
+    
+    with metric_col1:
+        st.markdown(f"""
+        <div class="metric-box">
+            <div class="metric-value">{len(prod_datasets):,}</div>
+            <div class="metric-label">Production Datasets</div>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with metric_col2:
+        st.markdown(f"""
+        <div class="metric-box">
+            <div class="metric-value">{len(dev_datasets):,}</div>
+            <div class="metric-label">Dev Datasets</div>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with metric_col3:
+        diff = len(prod_datasets) - len(dev_datasets) if len(prod_datasets) > len(dev_datasets) else 0
+        st.markdown(f"""
+        <div class="metric-box">
+            <div class="metric-value">{diff}</div>
+            <div class="metric-label">Missing in Dev</div>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with refresh_col:
+        st.markdown("<div style='height: 0.5rem'></div>", unsafe_allow_html=True)
+        if st.button("🔄 Refresh", use_container_width=True, help="Refresh dataset lists from DOMO"):
+            list_datasets.clear()
+            st.rerun()
     
     st.markdown('<div class="divider"></div>', unsafe_allow_html=True)
     
@@ -985,9 +1016,6 @@ def main():
                     <strong>Target:</strong> <span class="instance-badge instance-dev">DEV</span> {DEV_INSTANCE}
                 </div>
                 """, unsafe_allow_html=True)
-                
-                # Clear cache to refresh dev datasets list
-                list_datasets.clear()
                 
             except Exception as e:
                 progress_placeholder.empty()
