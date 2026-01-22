@@ -472,6 +472,224 @@ def create_dataset(instance: str, name: str, schema: List[Dict]) -> Dict:
     return response.json()
 
 
+def stream_copy_dataset(
+    source_instance: str, 
+    source_dataset_id: str,
+    target_instance: str,
+    target_dataset_id: str,
+    date_column: str = None,
+    start_date=None,
+    end_date=None,
+    progress_callback=None,
+    status_callback=None
+) -> int:
+    """
+    Stream data directly from source to target without loading all into memory.
+    Returns total rows copied.
+    """
+    source_token = get_oauth_token(source_instance)
+    target_token = get_oauth_token(target_instance)
+    
+    # Get source dataset info
+    source_info = get_dataset_info(source_instance, source_dataset_id)
+    schema = source_info.get('schema', {}).get('columns', [])
+    column_names = [col['name'] for col in schema]
+    total_rows = source_info.get('rows', 0)
+    
+    # Build WHERE clause for date filtering
+    where_clause = ""
+    if date_column and start_date and end_date:
+        where_clause = f"WHERE `{date_column}` >= '{start_date}' AND `{date_column}` <= '{end_date}'"
+    
+    # Get count of rows to copy
+    if where_clause:
+        count_sql = f"SELECT COUNT(*) as cnt FROM table {where_clause}"
+        url = f"https://api.domo.com/v1/datasets/query/execute/{source_dataset_id}"
+        headers = {'Authorization': f'Bearer {source_token}', 'Content-Type': 'application/json'}
+        
+        try:
+            response = requests.post(url, headers=headers, json={"sql": count_sql}, timeout=120)
+            if response.status_code == 200:
+                result = response.json()
+                if result.get('rows') and result['rows'][0]:
+                    total_rows = int(result['rows'][0][0])
+        except:
+            pass
+    
+    if status_callback:
+        status_callback(f"📊 Total rows to copy: {total_rows:,}")
+    
+    # Setup target stream for upload
+    target_headers = {'Authorization': f'Bearer {target_token}', 'Content-Type': 'application/json'}
+    
+    # Get or create stream for target dataset
+    stream_id = None
+    stream_url = "https://api.domo.com/v1/streams"
+    
+    # Search for existing stream
+    response = requests.get(stream_url, headers=target_headers, params={'limit': 500}, timeout=60)
+    if response.status_code == 200:
+        streams = response.json()
+        for stream in streams:
+            if stream.get('dataSet', {}).get('id') == target_dataset_id:
+                stream_id = stream.get('id')
+                break
+    
+    # Create stream if not exists
+    if not stream_id:
+        payload = {"dataSet": {"id": target_dataset_id}, "updateMethod": "REPLACE"}
+        response = requests.post(stream_url, headers=target_headers, json=payload, timeout=60)
+        if response.status_code in [200, 201]:
+            stream_id = response.json().get('id')
+    
+    if not stream_id:
+        raise Exception("Failed to create upload stream for target dataset")
+    
+    # Create execution
+    exec_url = f"https://api.domo.com/v1/streams/{stream_id}/executions"
+    response = requests.post(exec_url, headers=target_headers, timeout=60)
+    response.raise_for_status()
+    execution_id = response.json().get('id')
+    
+    if status_callback:
+        status_callback(f"🚀 Started upload stream (execution {execution_id})")
+    
+    # Stream data in chunks
+    chunk_size = 100000  # 100k rows per chunk
+    offset = 0
+    part_num = 1
+    total_copied = 0
+    
+    source_headers = {'Authorization': f'Bearer {source_token}', 'Content-Type': 'application/json'}
+    
+    try:
+        while offset < total_rows:
+            if progress_callback:
+                progress_callback(offset, total_rows)
+            
+            if status_callback:
+                status_callback(f"📥 Fetching rows {offset:,} - {min(offset + chunk_size, total_rows):,}...")
+            
+            # Fetch chunk from source
+            sql = f"SELECT * FROM table {where_clause} LIMIT {chunk_size} OFFSET {offset}"
+            url = f"https://api.domo.com/v1/datasets/query/execute/{source_dataset_id}"
+            
+            response = requests.post(url, headers=source_headers, json={"sql": sql}, timeout=300)
+            response.raise_for_status()
+            
+            result = response.json()
+            columns = result.get('columns', [])
+            rows = result.get('rows', [])
+            
+            if not rows:
+                break
+            
+            # Convert to CSV
+            chunk_df = pd.DataFrame(rows, columns=columns)
+            csv_data = chunk_df.to_csv(index=False, header=(part_num == 1))
+            
+            # Immediately upload to target
+            if status_callback:
+                status_callback(f"📤 Uploading part {part_num} ({len(rows):,} rows)...")
+            
+            part_url = f"https://api.domo.com/v1/streams/{stream_id}/executions/{execution_id}/part/{part_num}"
+            upload_headers = {'Authorization': f'Bearer {target_token}', 'Content-Type': 'text/csv'}
+            
+            response = requests.put(part_url, headers=upload_headers, data=csv_data.encode('utf-8'), timeout=300)
+            response.raise_for_status()
+            
+            # Free memory
+            del chunk_df
+            del csv_data
+            del rows
+            
+            total_copied += len(result.get('rows', []))
+            offset += chunk_size
+            part_num += 1
+            
+            # Check if we got fewer rows than requested (end of data)
+            if len(result.get('rows', [])) < chunk_size:
+                break
+        
+        # Commit the execution
+        if status_callback:
+            status_callback(f"✅ Committing upload ({total_copied:,} rows)...")
+        
+        commit_url = f"https://api.domo.com/v1/streams/{stream_id}/executions/{execution_id}/commit"
+        response = requests.put(commit_url, headers=target_headers, timeout=120)
+        response.raise_for_status()
+        
+        return total_copied
+        
+    except Exception as e:
+        # Abort execution on failure
+        try:
+            abort_url = f"https://api.domo.com/v1/streams/{stream_id}/executions/{execution_id}/abort"
+            requests.put(abort_url, headers=target_headers, timeout=30)
+        except:
+            pass
+        raise e
+    """Upload data to a dataset with support for large datasets."""
+    token = get_oauth_token(instance)
+    
+    total_rows = len(df)
+    
+    # For smaller datasets, upload directly
+    if total_rows < 100000:
+        url = f"https://api.domo.com/v1/datasets/{dataset_id}/data"
+        headers = get_oauth_headers(token)
+        headers['Content-Type'] = 'text/csv'
+        
+        csv_data = df.to_csv(index=False)
+        
+        response = requests.put(url, headers=headers, data=csv_data.encode('utf-8'), timeout=300)
+        response.raise_for_status()
+        return True
+    
+    # For large datasets, use stream API with parts
+    headers = get_oauth_headers(token)
+    
+    # Get or create stream for this dataset
+    stream_url = "https://api.domo.com/v1/streams"
+    
+    # Search for existing stream
+    stream_id = None
+    params = {'limit': 500}
+    response = requests.get(stream_url, headers=headers, params=params, timeout=60)
+    
+    if response.status_code == 200:
+        streams = response.json()
+        for stream in streams:
+            if stream.get('dataSet', {}).get('id') == dataset_id:
+                stream_id = stream.get('id')
+                break
+    
+    # If no stream exists, create one
+    if not stream_id:
+        payload = {
+            "dataSet": {"id": dataset_id},
+            "updateMethod": "REPLACE"
+        }
+        response = requests.post(stream_url, headers=headers, json=payload, timeout=60)
+        if response.status_code in [200, 201]:
+            stream_id = response.json().get('id')
+    
+    if stream_id:
+        # Use stream-based upload
+        return upload_via_stream(instance, stream_id, df, progress_callback)
+    else:
+        # Fallback: try direct upload anyway
+        url = f"https://api.domo.com/v1/datasets/{dataset_id}/data"
+        headers = get_oauth_headers(token)
+        headers['Content-Type'] = 'text/csv'
+        
+        csv_data = df.to_csv(index=False)
+        
+        response = requests.put(url, headers=headers, data=csv_data.encode('utf-8'), timeout=600)
+        response.raise_for_status()
+        return True
+
+
 def upload_data_to_dataset(instance: str, dataset_id: str, df: pd.DataFrame, progress_callback=None) -> bool:
     """Upload data to a dataset with support for large datasets."""
     token = get_oauth_token(instance)
@@ -939,83 +1157,124 @@ def main():
             status_placeholder = st.empty()
             
             try:
-                # Step 1: Export data from prod (with server-side date filtering for large datasets)
-                progress_placeholder.progress(0.1, "Exporting data from Production...")
-                status_placeholder.info("📥 Downloading data from production instance...")
-                
-                # Get row count first
+                # Get row count to decide on copy method
                 row_count = dataset_info.get('rows', 0)
-                if row_count > 100000:
-                    if selected_date_column and start_date and end_date:
-                        status_placeholder.info(f"📥 Large dataset ({row_count:,} rows). Applying date filter server-side...")
-                    else:
-                        status_placeholder.info(f"📥 Large dataset ({row_count:,} rows). Downloading in chunks...")
                 
-                def export_progress(current, total):
-                    pct = min(0.1 + (current / total) * 0.4, 0.5)
-                    progress_placeholder.progress(pct, f"Exporting: {current:,} / {total:,} rows...")
-                
-                # Pass date filter to export function for server-side filtering
-                df = export_dataset_data(
-                    PROD_INSTANCE, 
-                    selected_ds_id, 
-                    date_column=selected_date_column,
-                    start_date=start_date,
-                    end_date=end_date,
-                    progress_callback=export_progress if row_count > 100000 else None
-                )
-                original_count = len(df)
-                
-                # Date filtering is now done server-side, so we just report the count
-                status_placeholder.info(f"📊 Exported {original_count:,} rows")
-                
-                time.sleep(0.5)
-                
-                # Step 2: Create dataset in dev OR use existing
-                if target_exists_in_dev:
-                    # Use existing dataset
-                    progress_placeholder.progress(0.5, "Using existing dataset in Development...")
-                    status_placeholder.info(f"🔄 Found existing dataset: {target_exists_in_dev.get('id')}")
-                    new_dataset_id = target_exists_in_dev.get('id')
-                else:
-                    # Create new dataset
-                    progress_placeholder.progress(0.5, "Creating dataset in Development...")
-                    status_placeholder.info("🏗️ Creating new dataset in development instance...")
+                # For large datasets (> 500k rows), use streaming
+                if row_count > 500000:
+                    progress_placeholder.progress(0.05, "Preparing streaming copy...")
+                    status_placeholder.info(f"📊 Large dataset detected ({row_count:,} rows). Using streaming mode...")
                     
-                    new_dataset = create_dataset(
-                        DEV_INSTANCE,
-                        target_dataset_name,
-                        schema
+                    # Step 1: Create or get target dataset
+                    if target_exists_in_dev:
+                        new_dataset_id = target_exists_in_dev.get('id')
+                        status_placeholder.info(f"🔄 Using existing dataset: {new_dataset_id}")
+                    else:
+                        status_placeholder.info("🏗️ Creating new dataset in development instance...")
+                        new_dataset = create_dataset(DEV_INSTANCE, target_dataset_name, schema)
+                        new_dataset_id = new_dataset.get('id')
+                    
+                    # Step 2: Stream copy
+                    def stream_progress(current, total):
+                        pct = min(0.1 + (current / total) * 0.85, 0.95)
+                        progress_placeholder.progress(pct, f"Streaming: {current:,} / {total:,} rows...")
+                    
+                    def stream_status(msg):
+                        status_placeholder.info(msg)
+                    
+                    total_copied = stream_copy_dataset(
+                        source_instance=PROD_INSTANCE,
+                        source_dataset_id=selected_ds_id,
+                        target_instance=DEV_INSTANCE,
+                        target_dataset_id=new_dataset_id,
+                        date_column=selected_date_column,
+                        start_date=start_date,
+                        end_date=end_date,
+                        progress_callback=stream_progress,
+                        status_callback=stream_status
                     )
-                    new_dataset_id = new_dataset.get('id')
+                    
+                    # Done!
+                    progress_placeholder.progress(1.0, "Complete!")
+                    status_placeholder.empty()
+                    
+                    action_text = "Data Replaced" if target_exists_in_dev else "Dataset Created"
+                    
+                    st.markdown(f"""
+                    <div class="alert alert-success">
+                        <span class="alert-title">✅ {action_text} Successfully!</span><br/>
+                        <strong>Name:</strong> {target_dataset_name}<br/>
+                        <strong>Dataset ID:</strong> {new_dataset_id}<br/>
+                        <strong>Rows Copied:</strong> {total_copied:,}<br/>
+                        <strong>Mode:</strong> Streaming (memory efficient)<br/>
+                        <strong>Target:</strong> <span class="instance-badge instance-dev">DEV</span> {DEV_INSTANCE}
+                    </div>
+                    """, unsafe_allow_html=True)
                 
-                time.sleep(0.5)
-                
-                # Step 3: Upload data
-                progress_placeholder.progress(0.6, "Uploading data to Development...")
-                status_placeholder.info(f"📤 Uploading {len(df):,} rows to dev instance...")
-                
-                def upload_progress(current, total):
-                    pct = min(0.6 + (current / total) * 0.35, 0.95)
-                    progress_placeholder.progress(pct, f"Uploading: {current:,} / {total:,} rows...")
-                
-                upload_data_to_dataset(DEV_INSTANCE, new_dataset_id, df, progress_callback=upload_progress if len(df) > 500000 else None)
-                
-                # Done!
-                progress_placeholder.progress(1.0, "Complete!")
-                status_placeholder.empty()
-                
-                action_text = "Data Replaced" if target_exists_in_dev else "Dataset Created"
-                
-                st.markdown(f"""
-                <div class="alert alert-success">
-                    <span class="alert-title">✅ {action_text} Successfully!</span><br/>
-                    <strong>Name:</strong> {target_dataset_name}<br/>
-                    <strong>Dataset ID:</strong> {new_dataset_id}<br/>
-                    <strong>Rows Copied:</strong> {len(df):,}<br/>
-                    <strong>Target:</strong> <span class="instance-badge instance-dev">DEV</span> {DEV_INSTANCE}
-                </div>
-                """, unsafe_allow_html=True)
+                else:
+                    # For smaller datasets, use the original method
+                    # Step 1: Export data from prod
+                    progress_placeholder.progress(0.1, "Exporting data from Production...")
+                    status_placeholder.info("📥 Downloading data from production instance...")
+                    
+                    def export_progress(current, total):
+                        pct = min(0.1 + (current / total) * 0.4, 0.5)
+                        progress_placeholder.progress(pct, f"Exporting: {current:,} / {total:,} rows...")
+                    
+                    # Pass date filter to export function for server-side filtering
+                    df = export_dataset_data(
+                        PROD_INSTANCE, 
+                        selected_ds_id, 
+                        date_column=selected_date_column,
+                        start_date=start_date,
+                        end_date=end_date,
+                        progress_callback=export_progress if row_count > 100000 else None
+                    )
+                    original_count = len(df)
+                    
+                    status_placeholder.info(f"📊 Exported {original_count:,} rows")
+                    
+                    time.sleep(0.5)
+                    
+                    # Step 2: Create dataset in dev OR use existing
+                    if target_exists_in_dev:
+                        progress_placeholder.progress(0.5, "Using existing dataset in Development...")
+                        status_placeholder.info(f"🔄 Found existing dataset: {target_exists_in_dev.get('id')}")
+                        new_dataset_id = target_exists_in_dev.get('id')
+                    else:
+                        progress_placeholder.progress(0.5, "Creating dataset in Development...")
+                        status_placeholder.info("🏗️ Creating new dataset in development instance...")
+                        
+                        new_dataset = create_dataset(DEV_INSTANCE, target_dataset_name, schema)
+                        new_dataset_id = new_dataset.get('id')
+                    
+                    time.sleep(0.5)
+                    
+                    # Step 3: Upload data
+                    progress_placeholder.progress(0.6, "Uploading data to Development...")
+                    status_placeholder.info(f"📤 Uploading {len(df):,} rows to dev instance...")
+                    
+                    def upload_progress(current, total):
+                        pct = min(0.6 + (current / total) * 0.35, 0.95)
+                        progress_placeholder.progress(pct, f"Uploading: {current:,} / {total:,} rows...")
+                    
+                    upload_data_to_dataset(DEV_INSTANCE, new_dataset_id, df, progress_callback=upload_progress if len(df) > 100000 else None)
+                    
+                    # Done!
+                    progress_placeholder.progress(1.0, "Complete!")
+                    status_placeholder.empty()
+                    
+                    action_text = "Data Replaced" if target_exists_in_dev else "Dataset Created"
+                    
+                    st.markdown(f"""
+                    <div class="alert alert-success">
+                        <span class="alert-title">✅ {action_text} Successfully!</span><br/>
+                        <strong>Name:</strong> {target_dataset_name}<br/>
+                        <strong>Dataset ID:</strong> {new_dataset_id}<br/>
+                        <strong>Rows Copied:</strong> {len(df):,}<br/>
+                        <strong>Target:</strong> <span class="instance-badge instance-dev">DEV</span> {DEV_INSTANCE}
+                    </div>
+                    """, unsafe_allow_html=True)
                 
             except Exception as e:
                 progress_placeholder.empty()
