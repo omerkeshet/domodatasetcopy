@@ -368,7 +368,7 @@ def apply_custom_css():
     }
     
     .stProgress > div > div > div {
-        background: linear-gradient(90deg, var(--accent) 0%, #93fab4 100%) !important;
+        background: linear-gradient(90deg, #ffffff 0%, #f0f0f0 100%) !important;
         border-radius: 10px !important;
     }
     
