@@ -376,14 +376,35 @@ def apply_custom_css():
     }
     
     /* Progress bar - fix to show actual progress */
+    .stProgress {
+        background: transparent !important;
+    }
+    
+    .stProgress > div {
+        background: transparent !important;
+    }
+    
     .stProgress > div > div {
-        background-color: var(--bg-tertiary) !important;
+        background-color: #ffffff !important;
         border-radius: 10px !important;
+        border: 1px solid var(--border-color) !important;
+        overflow: hidden !important;
     }
     
     .stProgress > div > div > div {
         background: linear-gradient(90deg, var(--accent) 0%, #60a5fa 100%) !important;
-        border-radius: 10px !important;
+        border-radius: 8px !important;
+        transition: width 0.3s ease !important;
+    }
+    
+    /* Target the actual progress indicator */
+    div[data-testid="stProgress"] > div > div > div {
+        background: linear-gradient(90deg, var(--accent) 0%, #60a5fa 100%) !important;
+    }
+    
+    div[data-testid="stProgress"] > div > div {
+        background-color: #ffffff !important;
+        border: 1px solid var(--border-color) !important;
     }
     
     /* Hide Streamlit branding */
