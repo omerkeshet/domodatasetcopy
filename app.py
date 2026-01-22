@@ -347,6 +347,20 @@ def apply_custom_css():
         transform: translateY(0);
     }
     
+    /* Cancel button styling - secondary style */
+    .stButton > button[kind="secondary"],
+    div[data-testid="stButton"]:has(button[key*="cancel"]) > button {
+        background: var(--bg-secondary) !important;
+        color: var(--text-secondary) !important;
+        border: 1px solid var(--border-color) !important;
+    }
+    
+    div[data-testid="stButton"]:has(button[key*="cancel"]) > button:hover {
+        background: var(--bg-tertiary) !important;
+        color: var(--error) !important;
+        border-color: var(--error) !important;
+    }
+    
     /* Input styling */
     .stTextInput > div > div > input,
     .stSelectbox > div > div > div {
@@ -628,7 +642,8 @@ def stream_copy_dataset(
     start_date=None,
     end_date=None,
     progress_callback=None,
-    status_callback=None
+    status_callback=None,
+    cancel_check=None
 ) -> int:
     """
     Stream data directly from source to target without loading all into memory.
@@ -685,6 +700,12 @@ def stream_copy_dataset(
         source_headers = {'Authorization': f'Bearer {source_token}', 'Content-Type': 'application/json'}
         
         while offset < total_rows:
+            # Check for cancellation
+            if cancel_check and cancel_check():
+                if status_callback:
+                    status_callback("Operation cancelled by user")
+                raise Exception("Operation cancelled by user")
+            
             if progress_callback:
                 progress_callback(offset, total_rows)
             
@@ -727,6 +748,12 @@ def stream_copy_dataset(
         
         # Close temp file
         temp_file.close()
+        
+        # Check for cancellation before upload
+        if cancel_check and cancel_check():
+            if status_callback:
+                status_callback("Operation cancelled by user")
+            raise Exception("Operation cancelled by user")
         
         if status_callback:
             status_callback(f"Uploading {total_copied:,} rows to target...")
@@ -1279,8 +1306,21 @@ def main():
         copy_button = st.button("Copy to Development", type="primary", use_container_width=True)
         
         if copy_button:
+            # Initialize cancel state
+            if 'cancel_copy' not in st.session_state:
+                st.session_state.cancel_copy = False
+            st.session_state.cancel_copy = False
+            
             progress_placeholder = st.empty()
             status_placeholder = st.empty()
+            cancel_placeholder = st.empty()
+            
+            # Show cancel button
+            if cancel_placeholder.button("Cancel", key="cancel_btn", use_container_width=True):
+                st.session_state.cancel_copy = True
+            
+            def check_cancelled():
+                return st.session_state.get('cancel_copy', False)
             
             try:
                 # Get row count to decide on copy method
@@ -1317,18 +1357,20 @@ def main():
                         start_date=start_date,
                         end_date=end_date,
                         progress_callback=stream_progress,
-                        status_callback=stream_status
+                        status_callback=stream_status,
+                        cancel_check=check_cancelled
                     )
                     
                     # Done!
                     progress_placeholder.progress(1.0, "Complete!")
                     status_placeholder.empty()
+                    cancel_placeholder.empty()
                     
                     action_text = "Data Replaced" if target_exists_in_dev else "Dataset Created"
                     
                     st.markdown(f"""
                     <div class="alert alert-success">
-                        <span class="alert-title">{action_text} Successfully!</span><br/>
+                        <span class="alert-title">{action_text} Successfully</span><br/>
                         <strong>Name:</strong> {target_dataset_name}<br/>
                         <strong>Dataset ID:</strong> {new_dataset_id}<br/>
                         <strong>Rows Copied:</strong> {total_copied:,}<br/>
@@ -1389,12 +1431,13 @@ def main():
                     # Done!
                     progress_placeholder.progress(1.0, "Complete!")
                     status_placeholder.empty()
+                    cancel_placeholder.empty()
                     
                     action_text = "Data Replaced" if target_exists_in_dev else "Dataset Created"
                     
                     st.markdown(f"""
                     <div class="alert alert-success">
-                        <span class="alert-title">{action_text} Successfully!</span><br/>
+                        <span class="alert-title">{action_text} Successfully</span><br/>
                         <strong>Name:</strong> {target_dataset_name}<br/>
                         <strong>Dataset ID:</strong> {new_dataset_id}<br/>
                         <strong>Rows Copied:</strong> {len(df):,}<br/>
@@ -1405,13 +1448,24 @@ def main():
             except Exception as e:
                 progress_placeholder.empty()
                 status_placeholder.empty()
-                st.markdown(f"""
-                <div class="alert alert-error">
-                    <span class="alert-title">Copy Failed</span><br/>
-                    Error: {str(e)}
-                </div>
-                """, unsafe_allow_html=True)
-                st.exception(e)
+                cancel_placeholder.empty()
+                
+                error_msg = str(e)
+                if "cancelled" in error_msg.lower():
+                    st.markdown(f"""
+                    <div class="alert alert-warning">
+                        <span class="alert-title">Operation Cancelled</span><br/>
+                        The copy operation was cancelled by user.
+                    </div>
+                    """, unsafe_allow_html=True)
+                else:
+                    st.markdown(f"""
+                    <div class="alert alert-error">
+                        <span class="alert-title">Copy Failed</span><br/>
+                        Error: {error_msg}
+                    </div>
+                    """, unsafe_allow_html=True)
+                    st.exception(e)
 
 
 if __name__ == "__main__":
