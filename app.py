@@ -376,35 +376,50 @@ def apply_custom_css():
     }
     
     /* Progress bar - fix to show actual progress */
-    .stProgress {
+    /* Reset all progress bar backgrounds */
+    .stProgress,
+    .stProgress > div,
+    .stProgress > div > div,
+    [data-testid="stProgress"],
+    [data-testid="stProgress"] > div,
+    [data-testid="stProgress"] > div > div,
+    .st-emotion-cache-1gulkj5,
+    .st-emotion-cache-w3nhqi {
         background: transparent !important;
+        background-color: transparent !important;
     }
     
-    .stProgress > div {
-        background: transparent !important;
-    }
-    
-    .stProgress > div > div {
+    /* The track (empty part) - should be white */
+    .stProgress > div > div,
+    [data-testid="stProgress"] > div > div {
         background-color: #ffffff !important;
-        border-radius: 10px !important;
         border: 1px solid var(--border-color) !important;
+        border-radius: 10px !important;
         overflow: hidden !important;
     }
     
-    .stProgress > div > div > div {
+    /* The fill (progress part) - should be blue gradient */
+    .stProgress > div > div > div,
+    [data-testid="stProgress"] > div > div > div,
+    [role="progressbar"],
+    [data-testid="stProgressBar"] {
         background: linear-gradient(90deg, var(--accent) 0%, #60a5fa 100%) !important;
         border-radius: 8px !important;
-        transition: width 0.3s ease !important;
     }
     
-    /* Target the actual progress indicator */
-    div[data-testid="stProgress"] > div > div > div {
+    /* Override any default blue backgrounds */
+    .st-ae, .st-af, .st-ag, .st-ah, .st-ai {
+        background-color: #ffffff !important;
+    }
+    
+    /* Target progress bar by role */
+    div[role="progressbar"] {
         background: linear-gradient(90deg, var(--accent) 0%, #60a5fa 100%) !important;
     }
     
-    div[data-testid="stProgress"] > div > div {
-        background-color: #ffffff !important;
-        border: 1px solid var(--border-color) !important;
+    div[role="progressbar"]::before,
+    div[role="progressbar"]::after {
+        background: transparent !important;
     }
     
     /* Hide Streamlit branding */
