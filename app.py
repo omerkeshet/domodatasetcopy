@@ -351,8 +351,12 @@ def get_dataset_info(instance: str, dataset_id: str) -> Dict:
     return response.json()
 
 
-def export_dataset_data(instance: str, dataset_id: str, progress_callback=None) -> pd.DataFrame:
-    """Export dataset data as DataFrame with support for large datasets."""
+def export_dataset_data(instance: str, dataset_id: str, date_column: str = None, 
+                         start_date=None, end_date=None, progress_callback=None) -> pd.DataFrame:
+    """Export dataset data as DataFrame with support for large datasets.
+    
+    For large datasets, applies date filter server-side via SQL to reduce data transfer.
+    """
     token = get_oauth_token(instance)
     
     # First get dataset info to know the size
@@ -361,8 +365,13 @@ def export_dataset_data(instance: str, dataset_id: str, progress_callback=None) 
     column_names = [col['name'] for col in schema]
     total_rows = dataset_info.get('rows', 0)
     
-    # For smaller datasets (under 500k rows), use direct export
-    if total_rows < 500000:
+    # Build WHERE clause for date filtering (applied server-side for efficiency)
+    where_clause = ""
+    if date_column and start_date and end_date:
+        where_clause = f"WHERE `{date_column}` >= '{start_date}' AND `{date_column}` <= '{end_date}'"
+    
+    # For smaller datasets (under 100k rows) without date filter, use direct export
+    if total_rows < 100000 and not where_clause:
         url = f"https://api.domo.com/v1/datasets/{dataset_id}/data"
         headers = get_oauth_headers(token)
         headers['Accept'] = 'text/csv'
@@ -387,23 +396,35 @@ def export_dataset_data(instance: str, dataset_id: str, progress_callback=None) 
         
         return df
     
-    # For large datasets, use SQL query with pagination
+    # For large datasets or when filtering, use SQL query with pagination
     all_data = []
-    chunk_size = 500000  # 500k rows per chunk
+    chunk_size = 100000  # 100k rows per chunk (reduced for memory efficiency)
     offset = 0
+    max_rows = 10000000  # Safety limit: 10M rows max
     
-    while offset < total_rows:
+    # First, get count of filtered data
+    count_sql = f"SELECT COUNT(*) as cnt FROM table {where_clause}"
+    url = f"https://api.domo.com/v1/datasets/query/execute/{dataset_id}"
+    headers = get_oauth_headers(token)
+    
+    try:
+        response = requests.post(url, headers=headers, json={"sql": count_sql}, timeout=120)
+        if response.status_code == 200:
+            result = response.json()
+            if result.get('rows') and result['rows'][0]:
+                total_rows = int(result['rows'][0][0])
+    except:
+        pass  # Use original total_rows if count fails
+    
+    while offset < min(total_rows, max_rows):
         if progress_callback:
             progress_callback(offset, total_rows)
         
-        url = f"https://api.domo.com/v1/datasets/query/execute/{dataset_id}"
-        headers = get_oauth_headers(token)
+        sql = f"SELECT * FROM table {where_clause} LIMIT {chunk_size} OFFSET {offset}"
         
-        payload = {
-            "sql": f"SELECT * FROM table LIMIT {chunk_size} OFFSET {offset}"
-        }
+        payload = {"sql": sql}
         
-        response = requests.post(url, headers=headers, json=payload, timeout=600)
+        response = requests.post(url, headers=headers, json=payload, timeout=300)
         response.raise_for_status()
         
         result = response.json()
@@ -420,6 +441,10 @@ def export_dataset_data(instance: str, dataset_id: str, progress_callback=None) 
         
         # If we got fewer rows than requested, we're done
         if len(rows) < chunk_size:
+            break
+        
+        # Memory safety: if we've collected too much data, stop
+        if offset >= max_rows:
             break
     
     if all_data:
@@ -454,7 +479,7 @@ def upload_data_to_dataset(instance: str, dataset_id: str, df: pd.DataFrame, pro
     total_rows = len(df)
     
     # For smaller datasets, upload directly
-    if total_rows < 500000:
+    if total_rows < 100000:
         url = f"https://api.domo.com/v1/datasets/{dataset_id}/data"
         headers = get_oauth_headers(token)
         headers['Content-Type'] = 'text/csv'
@@ -466,17 +491,16 @@ def upload_data_to_dataset(instance: str, dataset_id: str, df: pd.DataFrame, pro
         return True
     
     # For large datasets, use stream API with parts
-    # First, create a stream execution
-    
-    # Get or create stream for this dataset
-    stream_url = f"https://api.domo.com/v1/streams"
     headers = get_oauth_headers(token)
     
+    # Get or create stream for this dataset
+    stream_url = "https://api.domo.com/v1/streams"
+    
     # Search for existing stream
+    stream_id = None
     params = {'limit': 500}
     response = requests.get(stream_url, headers=headers, params=params, timeout=60)
     
-    stream_id = None
     if response.status_code == 200:
         streams = response.json()
         for stream in streams:
@@ -498,7 +522,7 @@ def upload_data_to_dataset(instance: str, dataset_id: str, df: pd.DataFrame, pro
         # Use stream-based upload
         return upload_via_stream(instance, stream_id, df, progress_callback)
     else:
-        # Fallback: try direct upload anyway (might fail for very large datasets)
+        # Fallback: try direct upload anyway
         url = f"https://api.domo.com/v1/datasets/{dataset_id}/data"
         headers = get_oauth_headers(token)
         headers['Content-Type'] = 'text/csv'
@@ -522,8 +546,8 @@ def upload_via_stream(instance: str, stream_id: int, df: pd.DataFrame, progress_
     
     execution_id = response.json().get('id')
     
-    # Upload in chunks
-    chunk_size = 500000
+    # Upload in chunks (100k rows per chunk for memory efficiency)
+    chunk_size = 100000
     total_rows = len(df)
     part_num = 1
     
@@ -535,6 +559,7 @@ def upload_via_stream(instance: str, stream_id: int, df: pd.DataFrame, progress_
             end_idx = min(start_idx + chunk_size, total_rows)
             chunk_df = df.iloc[start_idx:end_idx]
             
+            # Only include header in first part
             csv_data = chunk_df.to_csv(index=False, header=(part_num == 1))
             
             part_url = f"https://api.domo.com/v1/streams/{stream_id}/executions/{execution_id}/part/{part_num}"
@@ -548,7 +573,7 @@ def upload_via_stream(instance: str, stream_id: int, df: pd.DataFrame, progress_
         
         # Commit execution
         commit_url = f"https://api.domo.com/v1/streams/{stream_id}/executions/{execution_id}/commit"
-        response = requests.put(commit_url, headers=headers, timeout=60)
+        response = requests.put(commit_url, headers=headers, timeout=120)
         response.raise_for_status()
         
         return True
@@ -883,46 +908,35 @@ def main():
             status_placeholder = st.empty()
             
             try:
-                # Step 1: Export data from prod
+                # Step 1: Export data from prod (with server-side date filtering for large datasets)
                 progress_placeholder.progress(0.1, "Exporting data from Production...")
                 status_placeholder.info("📥 Downloading data from production instance...")
                 
                 # Get row count first
                 row_count = dataset_info.get('rows', 0)
-                if row_count > 500000:
-                    status_placeholder.info(f"📥 Large dataset detected ({row_count:,} rows). Downloading in chunks...")
+                if row_count > 100000:
+                    if selected_date_column and start_date and end_date:
+                        status_placeholder.info(f"📥 Large dataset ({row_count:,} rows). Applying date filter server-side...")
+                    else:
+                        status_placeholder.info(f"📥 Large dataset ({row_count:,} rows). Downloading in chunks...")
                 
                 def export_progress(current, total):
                     pct = min(0.1 + (current / total) * 0.4, 0.5)
                     progress_placeholder.progress(pct, f"Exporting: {current:,} / {total:,} rows...")
                 
-                df = export_dataset_data(PROD_INSTANCE, selected_ds_id, progress_callback=export_progress if row_count > 500000 else None)
+                # Pass date filter to export function for server-side filtering
+                df = export_dataset_data(
+                    PROD_INSTANCE, 
+                    selected_ds_id, 
+                    date_column=selected_date_column,
+                    start_date=start_date,
+                    end_date=end_date,
+                    progress_callback=export_progress if row_count > 100000 else None
+                )
                 original_count = len(df)
                 
-                # Apply date filter if specified
-                if selected_date_column and start_date and end_date:
-                    # Check if column exists in dataframe
-                    if selected_date_column not in df.columns:
-                        # Try case-insensitive match
-                        matching_cols = [c for c in df.columns if c.lower() == selected_date_column.lower()]
-                        if matching_cols:
-                            selected_date_column = matching_cols[0]
-                        else:
-                            status_placeholder.warning(f"⚠️ Column '{selected_date_column}' not found. Copying all data.")
-                            selected_date_column = None
-                    
-                    if selected_date_column:
-                        df[selected_date_column] = pd.to_datetime(df[selected_date_column], errors='coerce')
-                        df = df[
-                            (df[selected_date_column] >= pd.Timestamp(start_date)) & 
-                            (df[selected_date_column] <= pd.Timestamp(end_date))
-                        ]
-                        filtered_count = len(df)
-                        status_placeholder.info(f"📊 Filtered {original_count:,} rows → {filtered_count:,} rows")
-                    else:
-                        status_placeholder.info(f"📊 Exported {original_count:,} rows")
-                else:
-                    status_placeholder.info(f"📊 Exported {original_count:,} rows")
+                # Date filtering is now done server-side, so we just report the count
+                status_placeholder.info(f"📊 Exported {original_count:,} rows")
                 
                 time.sleep(0.5)
                 
