@@ -391,24 +391,6 @@ def apply_custom_css():
     .stDeployButton {display: none;}
     header {visibility: hidden;}
     
-    /* Hide the stale/duplicate UI that appears during script reruns */
-    [data-stale="true"] {
-        display: none !important;
-    }
-    
-    .stale-element {
-        display: none !important;
-    }
-    
-    /* Alternative: make stale elements invisible instead of taking space */
-    div[data-stale="true"] {
-        visibility: hidden !important;
-        height: 0 !important;
-        overflow: hidden !important;
-        margin: 0 !important;
-        padding: 0 !important;
-    }
-    
     /* Checkbox styling */
     .stCheckbox > label {
         font-size: 0.875rem !important;
