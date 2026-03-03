@@ -14,6 +14,31 @@ from io import StringIO
 import time
 
 # =============================================================================
+# AUTHENTICATION
+# =============================================================================
+
+def check_password():
+    """Simple password protection using st.secrets."""
+    if "authenticated" not in st.session_state:
+        st.session_state.authenticated = False
+    if st.session_state.authenticated:
+        return True
+    st.set_page_config(page_title="Login", page_icon="◇", layout="centered")
+    st.markdown("<h2 style='text-align:center;'>🔒 Dataset Copy Tool</h2>", unsafe_allow_html=True)
+    with st.form("login_form"):
+        username = st.text_input("Username")
+        password = st.text_input("Password", type="password")
+        submitted = st.form_submit_button("Login", use_container_width=True)
+    if submitted:
+        if (username == st.secrets["app_auth"]["username"]
+                and password == st.secrets["app_auth"]["password"]):
+            st.session_state.authenticated = True
+            st.rerun()
+        else:
+            st.error("Invalid username or password.")
+    return False
+
+# =============================================================================
 # CONFIGURATION
 # =============================================================================
 
@@ -1455,4 +1480,5 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    if check_password():
+        main()
